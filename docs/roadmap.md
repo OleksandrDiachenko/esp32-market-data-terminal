@@ -34,10 +34,10 @@ Acceptance criteria:
 Status: Planned
 
 Acceptance criteria:
-- [ ] `app_main()` stays small
-- [ ] Application lifecycle module exists
-- [ ] Init/start failures return `esp_err_t`
-- [ ] Lifecycle logs are visible in monitor
+- [x] `app_main()` stays small
+- [x] Application lifecycle module exists
+- [x] Init/start failures return `esp_err_t`
+- [x] Lifecycle logs are visible in monitor
 
 ### Phase 3: Display/UI skeleton
 Status: Planned
