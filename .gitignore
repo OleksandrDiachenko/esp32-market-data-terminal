@@ -18,9 +18,7 @@ managed_components/
 /.clangd
 
 # Compiled host-test binaries (built by `make -C components/*/host_test test`)
-components/*/host_test/test_*
-!components/*/host_test/test_*.c
-components/*/host_test/*.dSYM/
+components/*/host_test/build/
 
 # Agent files
 /AGENTS.md
