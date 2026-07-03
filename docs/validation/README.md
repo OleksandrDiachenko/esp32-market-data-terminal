@@ -11,6 +11,7 @@ and runtime behavior on the real ESP32-P4 board.
 - [ESP32-P4 startup diagnostics](esp32-p4-startup-diagnostics.md)
 - [Application lifecycle](app-lifecycle-hardware-test.md)
 - [Display and touch bring-up](display-touch-bring-up.md)
+- [ESP-Hosted Wi-Fi link bring-up](wifi-hosted-link-bring-up.md)
 
 ## Report Template
 

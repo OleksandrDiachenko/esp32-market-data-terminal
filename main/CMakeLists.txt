@@ -8,4 +8,6 @@ idf_component_register(
         "."
     REQUIRES
         board_jc4880p443c
+        wifi_manager
+        nvs_flash
 )
