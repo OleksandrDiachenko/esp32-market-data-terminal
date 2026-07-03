@@ -1,5 +1,6 @@
 #include "startup_diagnostics.h"
 #include "app_lifecycle.h"
+#include "display_ui.h"
 
 #include "esp_log.h"
 
@@ -18,6 +19,12 @@ void app_main(void)
     if (app_lifecycle_start() != ESP_OK)
     {
         ESP_LOGE(TAG, "Application lifecycle failed to start");
+        return;
+    }
+
+    if (display_ui_start() != ESP_OK)
+    {
+        ESP_LOGE(TAG, "Display UI failed to start");
         return;
     }
 }

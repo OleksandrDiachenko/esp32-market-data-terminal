@@ -12,7 +12,7 @@ debugging steps.
 
 - Target SoC: ESP32-P4
 - ESP-IDF target: `esp32p4`
-- Board/display: to be documented after hardware bring-up
+- Board/display: JC4880P443C_I_W, see [docs/hardware/jc4880p443c.md](docs/hardware/jc4880p443c.md)
 
 ## Toolchain
 
