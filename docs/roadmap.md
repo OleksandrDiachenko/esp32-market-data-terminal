@@ -68,8 +68,22 @@ Acceptance criteria:
 - [x] Wi-Fi credentials are stored encrypted, not in the repo
 - [x] Autoconnect validated on real hardware
 
-### Phase 6: Market data client
+### Phase 6: Device settings & time sync
+Status: In progress
+
+Acceptance criteria:
+- [x] Settings persistence contract (display/symbols/locale) defined in `settings_store`
+- [x] Settings stored unencrypted (default NVS partition) — no secrets involved
+- [x] Host-side tests cover codec seal/validate/corruption paths
+- [ ] SNTP time sync starts after Wi-Fi connects and sets system time (UTC)
+- [ ] Time sync failure/timeout is logged and does not block the rest of the app (soft dependency, same category as Wi-Fi)
+- [ ] `locale_settings_t`'s `posix_tz` is applied (`setenv`/`tzset`) for local-time display, kept separate from the UTC time source used for TLS validation
+
+### Phase 7: Market data client
 Status: Planned
+
+Note: depends on Phase 6's time sync — TLS certificate validation fails on
+an unsynced clock (default epoch), independent of any Wi-Fi connectivity.
 
 Acceptance criteria:
 - [ ] Public market data endpoint selected
@@ -77,7 +91,7 @@ Acceptance criteria:
 - [ ] JSON parser handles success/error paths
 - [ ] No API keys or secrets are required
 
-### Phase 7: Runtime state + error handling
+### Phase 8: Runtime state + error handling
 Status: Planned
 
 Acceptance criteria:
@@ -85,7 +99,7 @@ Acceptance criteria:
 - [ ] Recoverable errors are represented clearly
 - [ ] Fatal errors are logged and documented
 
-### Phase 8: Host-side tests + CI hardening
+### Phase 9: Host-side tests + CI hardening
 Status: Planned
 
 Acceptance criteria:
@@ -93,7 +107,7 @@ Acceptance criteria:
 - [ ] Parser/state machine tests added
 - [ ] CI runs host-side unit tests on push/PR
 
-### Phase 9: Portfolio polish
+### Phase 10: Portfolio polish
 Status: Planned
 
 Acceptance criteria:

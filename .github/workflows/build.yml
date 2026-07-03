@@ -28,3 +28,6 @@ jobs:
 
       - name: Run wifi_manager host tests
         run: make -C components/wifi_manager/host_test test
+
+      - name: Run settings_store host tests
+        run: make -C components/settings_store/host_test test
