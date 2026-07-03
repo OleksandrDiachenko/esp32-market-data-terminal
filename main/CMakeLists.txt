@@ -3,6 +3,9 @@ idf_component_register(
         "esp32-market-data-terminal.c"
         "startup_diagnostics.c"
         "app_lifecycle.c"
+        "display_ui.c"
     INCLUDE_DIRS
         "."
+    REQUIRES
+        board_jc4880p443c
 )

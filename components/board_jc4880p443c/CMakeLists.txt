@@ -1,0 +1,15 @@
+idf_component_register(
+    SRCS
+        "board_jc4880p443c.c"
+    INCLUDE_DIRS
+        "include"
+    REQUIRES
+        esp_lcd
+        esp_driver_gpio
+        esp_driver_i2c
+        esp_driver_ledc
+        esp_hw_support
+        espressif__esp_lcd_st7701
+        espressif__esp_lcd_touch_gt911
+        espressif__esp_lvgl_port
+)

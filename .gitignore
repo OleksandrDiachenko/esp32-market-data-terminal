@@ -7,6 +7,9 @@
 # ESP-IDF build output
 /build/
 
+# ESP-IDF component manager downloads (regenerated from idf_component.yml)
+managed_components/
+
 # ESP-IDF generated files
 /sdkconfig
 /sdkconfig.old

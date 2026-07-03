@@ -48,15 +48,15 @@ Acceptance criteria:
 - [x] Build status is visible on pull requests
 
 ### Phase 4: Display/UI skeleton
-Status: Planned
+Status: Done
 
 Acceptance criteria:
-- [ ] Display board layer is isolated
-- [ ] Backlight/display init is documented
-- [ ] Minimal UI renders on screen
-- [ ] Display failure path is logged
-- [ ] Touch controller is initialized and registered as an LVGL input device
-- [ ] Touch failure path is logged
+- [x] Display board layer is isolated
+- [x] Backlight/display init is documented
+- [x] Minimal UI renders on screen
+- [x] Display failure path is logged
+- [x] Touch controller is initialized and registered as an LVGL input device
+- [x] Touch failure path is logged
 
 ### Phase 5: Network connectivity
 Status: Planned
