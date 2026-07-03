@@ -69,7 +69,7 @@ Acceptance criteria:
 - [x] Autoconnect validated on real hardware
 
 ### Phase 6: Device settings & time sync
-Status: In progress (pending hardware validation)
+Status: Done
 
 Acceptance criteria:
 - [x] Settings persistence contract (display/symbols/locale) defined in `settings_store`
@@ -78,7 +78,7 @@ Acceptance criteria:
 - [x] SNTP time sync starts after Wi-Fi connects and sets system time (UTC)
 - [x] Time sync failure/timeout is logged and does not block the rest of the app (soft dependency, same category as Wi-Fi)
 - [x] `locale_settings_t`'s `posix_tz` is applied (`setenv`/`tzset`) for local-time display, kept separate from the UTC time source used for TLS validation
-- [ ] SNTP sync validated on real hardware (log line confirms sync after Wi-Fi connects)
+- [x] SNTP sync validated on real hardware (JC4880P443C_I_W: connected to saved profile, got IP, `time_sync: System time synced via SNTP` logged ~0.5s later)
 
 ### Phase 7: Market data client
 Status: Planned
