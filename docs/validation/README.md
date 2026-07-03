@@ -12,6 +12,7 @@ and runtime behavior on the real ESP32-P4 board.
 - [Application lifecycle](app-lifecycle-hardware-test.md)
 - [Display and touch bring-up](display-touch-bring-up.md)
 - [ESP-Hosted Wi-Fi link bring-up](wifi-hosted-link-bring-up.md)
+- [Wi-Fi autoconnect](wifi-autoconnect-hardware-test.md)
 
 ## Report Template
 

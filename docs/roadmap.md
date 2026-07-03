@@ -59,12 +59,14 @@ Acceptance criteria:
 - [x] Touch failure path is logged
 
 ### Phase 5: Network connectivity
-Status: Planned
+Status: Done
 
 Acceptance criteria:
-- [ ] Connectivity approach for ESP32-P4 + ESP32-C6 is documented
-- [ ] Wi-Fi/hosted dependency decision is recorded
-- [ ] Network init has timeout/error handling
+- [x] Connectivity approach for ESP32-P4 + ESP32-C6 is documented
+- [x] Wi-Fi/hosted dependency decision is recorded
+- [x] Network init has timeout/error handling
+- [x] Wi-Fi credentials are stored encrypted, not in the repo
+- [x] Autoconnect validated on real hardware
 
 ### Phase 6: Market data client
 Status: Planned

@@ -1,0 +1,20 @@
+menu "Wi-Fi manager"
+
+    config WIFI_MANAGER_DEV_SSID
+        string "Development Wi-Fi SSID (optional, do not commit)"
+        default ""
+        help
+            If set, this network is saved as a profile on first boot
+            (unless a profile with this SSID already exists), so hardware
+            bring-up works without a settings UI yet. Set this only via
+            menuconfig, in your local sdkconfig - sdkconfig is gitignored.
+            Never put real credentials in sdkconfig.defaults.
+
+    config WIFI_MANAGER_DEV_PASSWORD
+        string "Development Wi-Fi password (optional, do not commit)"
+        default ""
+        help
+            Password for WIFI_MANAGER_DEV_SSID. Same rule: local
+            sdkconfig only, never sdkconfig.defaults.
+
+endmenu

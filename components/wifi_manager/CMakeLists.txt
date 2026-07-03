@@ -14,6 +14,7 @@ idf_component_register(
         esp_event
         esp_netif
         esp_partition
+        esp_timer
         heap
         nvs_flash
         espressif__esp_hosted
