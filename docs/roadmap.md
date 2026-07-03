@@ -22,7 +22,7 @@ Acceptance criteria:
 - [x] README/docs skeleton exists
 
 ### Phase 1: Board bring-up
-Status: In progress
+Status: Done
 
 Acceptance criteria:
 - [x] ESP32-P4 target configured
@@ -31,7 +31,7 @@ Acceptance criteria:
 - [x] Hardware test notes documented
 
 ### Phase 2: Application lifecycle
-Status: Planned
+Status: Done
 
 Acceptance criteria:
 - [x] `app_main()` stays small
@@ -39,7 +39,15 @@ Acceptance criteria:
 - [x] Init/start failures return `esp_err_t`
 - [x] Lifecycle logs are visible in monitor
 
-### Phase 3: Display/UI skeleton
+### Phase 3: Minimal CI
+Status: Planned
+
+Acceptance criteria:
+- [ ] GitHub Actions workflow added
+- [ ] Workflow runs `idf.py build` on push/PR to `main`
+- [ ] Build status is visible on pull requests
+
+### Phase 4: Display/UI skeleton
 Status: Planned
 
 Acceptance criteria:
@@ -48,7 +56,7 @@ Acceptance criteria:
 - [ ] Minimal UI renders on screen
 - [ ] Display failure path is logged
 
-### Phase 4: Network connectivity
+### Phase 5: Network connectivity
 Status: Planned
 
 Acceptance criteria:
@@ -56,7 +64,7 @@ Acceptance criteria:
 - [ ] Wi-Fi/hosted dependency decision is recorded
 - [ ] Network init has timeout/error handling
 
-### Phase 5: Market data client
+### Phase 6: Market data client
 Status: Planned
 
 Acceptance criteria:
@@ -65,7 +73,7 @@ Acceptance criteria:
 - [ ] JSON parser handles success/error paths
 - [ ] No API keys or secrets are required
 
-### Phase 6: Runtime state + error handling
+### Phase 7: Runtime state + error handling
 Status: Planned
 
 Acceptance criteria:
@@ -73,15 +81,15 @@ Acceptance criteria:
 - [ ] Recoverable errors are represented clearly
 - [ ] Fatal errors are logged and documented
 
-### Phase 7: Tests + CI
+### Phase 8: Host-side tests + CI hardening
 Status: Planned
 
 Acceptance criteria:
 - [ ] Host-testable modules identified
 - [ ] Parser/state machine tests added
-- [ ] Basic CI checks build or lint the project
+- [ ] CI runs host-side unit tests on push/PR
 
-### Phase 8: Portfolio polish
+### Phase 9: Portfolio polish
 Status: Planned
 
 Acceptance criteria:
