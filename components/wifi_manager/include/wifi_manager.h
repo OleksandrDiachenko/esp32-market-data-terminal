@@ -20,6 +20,7 @@ typedef struct
 {
     wifi_manager_state_t state;
     bool available;
+    bool profile_storage_available;
 } wifi_manager_snapshot_t;
 
 /**

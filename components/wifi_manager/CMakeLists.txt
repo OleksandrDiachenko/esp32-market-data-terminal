@@ -1,13 +1,20 @@
 idf_component_register(
     SRCS
         "src/wifi_manager.c"
+        "src/wifi_policy.c"
+        "src/wifi_profile_codec.c"
+        "src/wifi_profile_store.c"
     INCLUDE_DIRS
         "include"
+    PRIV_INCLUDE_DIRS
+        "src"
     REQUIRES
         esp_wifi
     PRIV_REQUIRES
         esp_event
         esp_netif
+        esp_partition
         heap
+        nvs_flash
         espressif__esp_hosted
 )

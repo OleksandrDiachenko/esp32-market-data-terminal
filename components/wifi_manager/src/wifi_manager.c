@@ -10,6 +10,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "sdkconfig.h"
+#include "wifi_profile_store.h"
 
 static const char *TAG = "wifi_manager";
 
@@ -132,6 +133,13 @@ esp_err_t wifi_manager_start(void)
 
     snapshot.state = WIFI_MANAGER_STATE_STARTING;
     esp_err_t ret = ESP_OK;
+
+    // Profile store failure is non-fatal: Wi-Fi still starts, it just can't
+    // remember networks across reboots (see wifi_profile_store.h).
+    bool profile_storage_available = false;
+    (void)wifi_profile_store_init(&profile_storage_available);
+    snapshot.profile_storage_available = profile_storage_available;
+    ESP_LOGI(TAG, "Wi-Fi profile storage available: %s", profile_storage_available ? "yes" : "no");
 
     ret = esp_netif_init();
     if (ret != ESP_OK && ret != ESP_ERR_INVALID_STATE)
