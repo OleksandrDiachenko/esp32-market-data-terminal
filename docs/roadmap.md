@@ -40,12 +40,12 @@ Acceptance criteria:
 - [x] Lifecycle logs are visible in monitor
 
 ### Phase 3: Minimal CI
-Status: Planned
+Status: Done
 
 Acceptance criteria:
-- [ ] GitHub Actions workflow added
-- [ ] Workflow runs `idf.py build` on push/PR to `main`
-- [ ] Build status is visible on pull requests
+- [x] GitHub Actions workflow added
+- [x] Workflow runs `idf.py build` on push/PR to `main`
+- [x] Build status is visible on pull requests
 
 ### Phase 4: Display/UI skeleton
 Status: Planned
