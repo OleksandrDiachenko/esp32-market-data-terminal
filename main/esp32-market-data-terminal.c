@@ -1,5 +1,7 @@
 #include "startup_diagnostics.h"
 #include "app_lifecycle.h"
+#include "app_state.h"
+#include "app_state_sync_task.h"
 #include "display_ui.h"
 #include "time_sync.h"
 #include "wifi_manager.h"
@@ -42,5 +44,23 @@ void app_main(void)
     if (time_sync_start() != ESP_OK)
     {
         ESP_LOGW(TAG, "Time sync failed to start; continuing with unsynced clock");
+    }
+
+    // app_state_init() only touches NVS/PSRAM (no network), so unlike
+    // Wi-Fi/time_sync a failure here means a genuine resource problem, not
+    // "no network yet" - treated as fatal like the other core modules
+    // above.
+    if (app_state_init() != ESP_OK)
+    {
+        ESP_LOGE(TAG, "Runtime state model failed to initialize");
+        return;
+    }
+
+    // The sync task itself is best-effort like Wi-Fi/time_sync: it waits
+    // out both being unavailable and simply retries, so a failure to
+    // create it only costs live market data, not the rest of the app.
+    if (app_state_sync_task_start() != ESP_OK)
+    {
+        ESP_LOGW(TAG, "Market data sync task failed to start; continuing without live data");
     }
 }

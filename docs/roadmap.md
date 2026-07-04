@@ -115,12 +115,36 @@ Acceptance criteria:
       `docs/validation/market-data-client-hardware-test.md`
 
 ### Phase 8: Runtime state + error handling
-Status: Planned
+Status: In progress
+
+Scope: per-symbol runtime state for the watchlist (`components/app_state`),
+REST bootstrap/resync orchestration on top of Phase 7's
+`market_data_client_fetch_klines_24h_5m_batch()`, and the fatal-vs-
+recoverable error taxonomy this project already follows in practice - see
+`docs/decisions/0003-runtime-state-error-handling.md`.
 
 Acceptance criteria:
-- [ ] Runtime state model exists
-- [ ] Recoverable errors are represented clearly
-- [ ] Fatal errors are logged and documented
+- [x] `app_state` holds per-symbol connection/data state with thread-safe
+      accessors (`app_state_get_symbol_meta()`/`_get_symbol_klines()`),
+      backed by PSRAM klines buffers sized for the full watchlist
+      (`SETTINGS_MAX_WATCHLIST` = 8)
+- [x] `market_data_err_t` is classified recoverable/unrecoverable
+      (`app_state_retry_is_recoverable()`)
+- [x] Backoff retry on recoverable errors - host-tested
+      (`app_state_retry_backoff_delay_ms()`,
+      `test_app_state_retry_policy.c`)
+- [x] Gap-detection resync (disconnect >= one 5m candle interval forces a
+      full watchlist re-fetch on reconnect) - host-tested
+      (`app_state_retry_needs_resync()`)
+- [x] `app_state_sync_task` fetches due watchlist symbols via the Phase 7
+      batch API and updates per-symbol state; wired into `app_main()`
+      after Wi-Fi/time_sync start
+- [x] Fatal vs recoverable error taxonomy documented
+      (`docs/decisions/0003-runtime-state-error-handling.md`)
+- [ ] Validated on real hardware: bootstrap of the whole watchlist, a short
+      disconnect (no forced resync), a long disconnect (forced resync), and
+      a recoverable-error retry on one symbol among several - all four
+      logged
 
 ### Phase 9: Real-time WebSocket streaming
 Status: Planned
