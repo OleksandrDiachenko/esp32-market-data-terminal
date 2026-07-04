@@ -196,13 +196,7 @@ market_data_err_t market_data_client_fetch_klines_24h_5m_batch(const char *const
 
     if (!time_sync_is_synced())
     {
-        for (uint8_t i = 0; i < symbol_count; i++)
-        {
-            out_results[i].symbol = symbols[i];
-            out_results[i].err = MARKET_DATA_ERR_NOT_SYNCED;
-            out_results[i].count = 0;
-        }
-        return MARKET_DATA_OK;
+        return MARKET_DATA_ERR_NOT_SYNCED;
     }
 
     const char *base_url = select_base_url();
