@@ -11,5 +11,6 @@ idf_component_register(
         wifi_manager
         settings_store
         time_sync
+        app_state
         nvs_flash
 )

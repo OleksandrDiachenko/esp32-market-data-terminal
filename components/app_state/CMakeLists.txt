@@ -1,0 +1,18 @@
+idf_component_register(
+    SRCS
+        "src/app_state.c"
+        "src/app_state_retry_policy.c"
+        "src/app_state_sync_task.c"
+    INCLUDE_DIRS
+        "include"
+    PRIV_INCLUDE_DIRS
+        "src"
+    REQUIRES
+        market_data_client
+        settings_store
+    PRIV_REQUIRES
+        heap
+        esp_timer
+        time_sync
+        wifi_manager
+)
