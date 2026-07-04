@@ -13,6 +13,8 @@ and runtime behavior on the real ESP32-P4 board.
 - [Display and touch bring-up](display-touch-bring-up.md)
 - [ESP-Hosted Wi-Fi link bring-up](wifi-hosted-link-bring-up.md)
 - [Wi-Fi autoconnect](wifi-autoconnect-hardware-test.md)
+- [Market data client](market-data-client-hardware-test.md)
+- [app_state runtime model](app-state-runtime-hardware-test.md)
 
 ## Report Template
 

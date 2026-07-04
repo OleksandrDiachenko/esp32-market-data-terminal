@@ -115,7 +115,7 @@ Acceptance criteria:
       `docs/validation/market-data-client-hardware-test.md`
 
 ### Phase 8: Runtime state + error handling
-Status: In progress
+Status: Done
 
 Scope: per-symbol runtime state for the watchlist (`components/app_state`),
 REST bootstrap/resync orchestration on top of Phase 7's
@@ -141,10 +141,13 @@ Acceptance criteria:
       after Wi-Fi/time_sync start
 - [x] Fatal vs recoverable error taxonomy documented
       (`docs/decisions/0003-runtime-state-error-handling.md`)
-- [ ] Validated on real hardware: bootstrap of the whole watchlist, a short
-      disconnect (no forced resync), a long disconnect (forced resync), and
-      a recoverable-error retry on one symbol among several - all four
-      logged
+- [x] Validated on real hardware (JC4880P443C_I_W): bootstrap of the whole
+      watchlist, a short disconnect (no forced resync), a long disconnect
+      (forced resync), and recoverable-error retry with exponential
+      backoff - all four logged, see
+      `docs/validation/app-state-runtime-hardware-test.md`. Also surfaced
+      and fixed a pre-existing Wi-Fi empty-SSID profile corruption bug in
+      `wifi_manager` (Phase 5) along the way - see the same report.
 
 ### Phase 9: Real-time WebSocket streaming
 Status: Planned
