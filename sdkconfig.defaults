@@ -76,3 +76,8 @@ CONFIG_ESP_HOSTED_USE_MEMPOOL=y
 CONFIG_ESP_HOSTED_MAX_SIMULTANEOUS_SYNC_RPC_REQUESTS=5
 CONFIG_ESP_HOSTED_MAX_SIMULTANEOUS_ASYNC_RPC_REQUESTS=5
 CONFIG_SLAVE_IDF_TARGET_ESP32C6=y
+
+# Lets a reused esp_http_client handle (market_data_http_next(), used by
+# market_data_client_fetch_klines_24h_5m_batch() for the watchlist) resume a
+# prior TLS session instead of paying a full handshake on every request.
+CONFIG_ESP_TLS_CLIENT_SESSION_TICKETS=y

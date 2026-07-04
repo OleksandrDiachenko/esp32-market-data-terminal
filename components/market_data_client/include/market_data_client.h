@@ -102,6 +102,34 @@ market_data_err_t market_data_client_fetch_klines(const market_data_klines_reque
 market_data_err_t market_data_client_fetch_klines_24h_5m(const char *symbol, market_data_kline_t *out_klines,
                                                            uint16_t out_capacity, uint16_t *out_count);
 
+// --- batch klines (watchlist) ---
+
+typedef struct
+{
+    const char *symbol;     // borrowed from the symbols[] array passed in - must outlive the call
+    market_data_err_t err;
+    uint16_t count;         // rows written to the matching out_klines_per_symbol[] entry; 0 if err != MARKET_DATA_OK
+} market_data_batch_result_t;
+
+// Fetches 24h/5m klines (same shape as market_data_client_fetch_klines_24h_5m)
+// for symbol_count symbols, one after another on a single reused HTTP
+// session (see market_data_http_next()) instead of opening/closing a new
+// client per symbol. A failure on one symbol is recorded in
+// out_results[i] and does not stop the rest of the batch - callers get a
+// best-effort result per symbol, checked via out_results[i].err.
+//
+// out_klines_per_symbol[i] must point to a buffer of at least
+// out_capacity_per_symbol entries; out_results must have symbol_count
+// entries. Returns MARKET_DATA_ERR_INVALID_ARG for bad arguments (checked
+// up front, before anything is fetched) and MARKET_DATA_ERR_NOT_SYNCED if
+// the clock isn't synced yet - in both cases no requests are made. Once the
+// batch actually starts, this always returns MARKET_DATA_OK; per-symbol
+// outcomes are in out_results.
+market_data_err_t market_data_client_fetch_klines_24h_5m_batch(const char *const *symbols, uint8_t symbol_count,
+                                                                 market_data_kline_t *const *out_klines_per_symbol,
+                                                                 uint16_t out_capacity_per_symbol,
+                                                                 market_data_batch_result_t *out_results);
+
 #ifdef __cplusplus
 }
 #endif

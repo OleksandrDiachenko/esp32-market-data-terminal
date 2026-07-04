@@ -84,6 +84,45 @@ market_data_err_t market_data_http_open(const char *url, uint32_t timeout_ms, ma
     return MARKET_DATA_OK;
 }
 
+market_data_err_t market_data_http_next(market_data_http_session_t *session, const char *url, uint32_t timeout_ms,
+                                         int *out_status)
+{
+    if (session == NULL || url == NULL || out_status == NULL)
+    {
+        return MARKET_DATA_ERR_INVALID_ARG;
+    }
+
+    // Tears down the previous request's transport connection but keeps the
+    // handle (headers, transport list, TLS session state) alive for reuse.
+    esp_http_client_close(session->client);
+    esp_http_client_clear_response_buffer(session->client);
+
+    if (esp_http_client_set_url(session->client, url) != ESP_OK)
+    {
+        return MARKET_DATA_ERR_INVALID_ARG;
+    }
+    esp_http_client_set_timeout_ms(session->client, (int)timeout_ms);
+
+    esp_err_t err = esp_http_client_open(session->client, 0);
+    if (err != ESP_OK)
+    {
+        ESP_LOGW(TAG, "Open failed for %s: %s", url, esp_err_to_name(err));
+        return map_open_error(err);
+    }
+
+    (void)esp_http_client_fetch_headers(session->client);
+
+    int status = esp_http_client_get_status_code(session->client);
+    if (status <= 0)
+    {
+        ESP_LOGW(TAG, "Fetching headers failed for %s", url);
+        return MARKET_DATA_ERR_NETWORK;
+    }
+
+    *out_status = status;
+    return MARKET_DATA_OK;
+}
+
 market_data_err_t market_data_http_stream_body(market_data_http_session_t *session, market_data_http_body_sink_t sink,
                                                 void *sink_ctx)
 {
