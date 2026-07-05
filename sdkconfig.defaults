@@ -90,7 +90,9 @@ CONFIG_SLAVE_IDF_TARGET_ESP32C6=y
 CONFIG_ESP_TLS_CLIENT_SESSION_TICKETS=y
 
 # Phase 11 dashboard UI: type scale needs more than the default 14px
-# Montserrat (12 for muted/range labels, 16 for ticker symbols, 18 for price).
+# Montserrat (12/14 for muted/range labels, 16/18 for ticker/change, 18/20
+# for price - bumped per a design-fidelity pass against the reviewed mockup).
 CONFIG_LV_FONT_MONTSERRAT_12=y
 CONFIG_LV_FONT_MONTSERRAT_16=y
 CONFIG_LV_FONT_MONTSERRAT_18=y
+CONFIG_LV_FONT_MONTSERRAT_20=y

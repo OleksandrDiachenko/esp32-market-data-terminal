@@ -20,8 +20,11 @@ static const char *TAG = "display_ui";
 #define ROW_HEIGHT_PX 76
 #define ROW_SIDE_COL_WIDTH_PX 128
 #define STATUSBAR_HEIGHT_PX 40
-#define SETTINGS_ROW_HEIGHT_PX 64
-#define SUBHEADER_HEIGHT_PX 56
+#define SETTINGS_ROW_HEIGHT_PX 108
+#define SETTINGS_LIST_HEADER_HEIGHT_PX 64
+#define SUBHEADER_HEIGHT_PX 64
+#define SETTINGS_ICON_CHIP_PX 40
+#define NAV_BUTTON_WIDTH_PX 130
 #define UPDATE_PERIOD_MS 1000
 
 #define COLOR_INK lv_color_hex(0x0A0C10)
@@ -70,6 +73,8 @@ static uint8_t s_row_count;
 static lv_timer_t *s_update_timer;
 
 static lv_obj_t *s_settings_list;
+static lv_obj_t *s_settings_wifi_row_desc;
+static lv_obj_t *s_settings_locale_row_desc;
 static lv_obj_t *s_clock_label;
 static lv_obj_t *s_conn_label;
 static lv_obj_t *s_nav_label;
@@ -83,7 +88,6 @@ static lv_obj_t *s_locale_screen;
 static locale_settings_t s_locale;
 
 static lv_obj_t *s_wifi_screen;
-static lv_obj_t *s_wifi_status_label;
 static lv_obj_t *s_wifi_list;
 // Static (not stack-local) so completed rows' click handlers can safely
 // reference "their" wifi_manager_ap_t by pointer after the function that
@@ -127,6 +131,74 @@ static void destroy_rows(void)
     s_row_count = 0;
 }
 
+// Fills the area under a row's sparkline with a fade from the series color
+// (at the line) to fully transparent (at the chart's bottom edge).
+// lv_chart has no built-in area-fill for LV_CHART_TYPE_LINE, so this hooks
+// LV_EVENT_DRAW_TASK_ADDED and replicates the technique from the vendored
+// managed_components/lvgl__lvgl/demos/widgets/lv_demo_widgets_analytics.c
+// (its own dashboard area chart), simplified here for a single series per
+// chart - no need for that demo's multi-series id lookup.
+static void chart_draw_event_cb(lv_event_t *e)
+{
+    lv_obj_t *chart = lv_event_get_target(e);
+    display_ui_row_t *row = (display_ui_row_t *)lv_event_get_user_data(e);
+    lv_draw_task_t *draw_task = lv_event_get_param(e);
+    lv_draw_dsc_base_t *base_dsc = lv_draw_task_get_draw_dsc(draw_task);
+    lv_draw_line_dsc_t *draw_line_dsc = lv_draw_task_get_line_dsc(draw_task);
+    if (base_dsc->part != LV_PART_ITEMS || draw_line_dsc == NULL)
+    {
+        return;
+    }
+
+    lv_area_t obj_coords;
+    lv_obj_get_coords(chart, &obj_coords);
+    lv_color_t color = lv_chart_get_series_color(chart, row->series);
+    int32_t full_h = lv_obj_get_height(chart);
+
+    for (int32_t i = 0; i < draw_line_dsc->point_cnt - 1; i++)
+    {
+        lv_point_precise_t p1 = draw_line_dsc->points[i];
+        lv_point_precise_t p2 = draw_line_dsc->points[i + 1];
+
+        lv_draw_triangle_dsc_t tri_dsc;
+        lv_draw_triangle_dsc_init(&tri_dsc);
+        tri_dsc.p[0].x = (int32_t)p1.x;
+        tri_dsc.p[0].y = (int32_t)p1.y;
+        tri_dsc.p[1].x = (int32_t)p2.x;
+        tri_dsc.p[1].y = (int32_t)p2.y;
+        tri_dsc.p[2].x = (int32_t)(p1.y < p2.y ? p1.x : p2.x);
+        tri_dsc.p[2].y = (int32_t)LV_MAX(p1.y, p2.y);
+        tri_dsc.grad.dir = LV_GRAD_DIR_VER;
+
+        int32_t fract_upper = (int32_t)(LV_MIN(p1.y, p2.y) - obj_coords.y1) * 255 / full_h;
+        int32_t fract_lower = (int32_t)(LV_MAX(p1.y, p2.y) - obj_coords.y1) * 255 / full_h;
+        tri_dsc.grad.stops[0].color = color;
+        tri_dsc.grad.stops[0].opa = (lv_opa_t)(255 - fract_upper);
+        tri_dsc.grad.stops[0].frac = 0;
+        tri_dsc.grad.stops[1].color = color;
+        tri_dsc.grad.stops[1].opa = (lv_opa_t)(255 - fract_lower);
+        tri_dsc.grad.stops[1].frac = 255;
+        lv_draw_triangle(base_dsc->layer, &tri_dsc);
+
+        lv_draw_rect_dsc_t rect_dsc;
+        lv_draw_rect_dsc_init(&rect_dsc);
+        rect_dsc.bg_grad.dir = LV_GRAD_DIR_VER;
+        rect_dsc.bg_grad.stops[0].color = color;
+        rect_dsc.bg_grad.stops[0].frac = 0;
+        rect_dsc.bg_grad.stops[0].opa = (lv_opa_t)(255 - fract_lower);
+        rect_dsc.bg_grad.stops[1].color = color;
+        rect_dsc.bg_grad.stops[1].frac = 255;
+        rect_dsc.bg_grad.stops[1].opa = 0;
+
+        lv_area_t rect_area;
+        rect_area.x1 = (int32_t)p1.x;
+        rect_area.x2 = (int32_t)p2.x;
+        rect_area.y1 = (int32_t)LV_MAX(p1.y, p2.y);
+        rect_area.y2 = obj_coords.y2;
+        lv_draw_rect(base_dsc->layer, &rect_dsc, &rect_area);
+    }
+}
+
 static void build_row(uint8_t index)
 {
     display_ui_row_t *row = &s_rows[index];
@@ -153,11 +225,11 @@ static void build_row(uint8_t index)
 
     row->ticker_label = lv_label_create(left);
     lv_obj_set_style_text_color(row->ticker_label, COLOR_TEXT, 0);
-    lv_obj_set_style_text_font(row->ticker_label, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_font(row->ticker_label, &lv_font_montserrat_18, 0);
 
     row->range_label = lv_label_create(left);
     lv_obj_set_style_text_color(row->range_label, COLOR_MUTED, 0);
-    lv_obj_set_style_text_font(row->range_label, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_font(row->range_label, &lv_font_montserrat_14, 0);
     lv_label_set_text(row->range_label, "-- / --");
 
     // Middle: sparkline.
@@ -169,8 +241,9 @@ static void build_row(uint8_t index)
     lv_obj_set_style_bg_opa(row->chart, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(row->chart, 0, 0);
     lv_obj_set_style_size(row->chart, 0, 0, LV_PART_INDICATOR); // hide point markers
-    lv_obj_set_style_line_width(row->chart, 2, LV_PART_ITEMS);
+    lv_obj_set_style_line_width(row->chart, 3, LV_PART_ITEMS);
     row->series = lv_chart_add_series(row->chart, COLOR_MUTED, LV_CHART_AXIS_PRIMARY_Y);
+    lv_obj_add_event_cb(row->chart, chart_draw_event_cb, LV_EVENT_DRAW_TASK_ADDED, row);
 
     // Right: price + change, right-aligned.
     lv_obj_t *right = lv_obj_create(row->row);
@@ -182,10 +255,11 @@ static void build_row(uint8_t index)
 
     row->price_label = lv_label_create(right);
     lv_obj_set_style_text_color(row->price_label, COLOR_TEXT, 0);
-    lv_obj_set_style_text_font(row->price_label, &lv_font_montserrat_18, 0);
+    lv_obj_set_style_text_font(row->price_label, &lv_font_montserrat_20, 0);
 
     row->change_label = lv_label_create(right);
     lv_obj_set_style_text_color(row->change_label, COLOR_MUTED, 0);
+    lv_obj_set_style_text_font(row->change_label, &lv_font_montserrat_16, 0);
     lv_label_set_text(row->change_label, "Loading...");
 }
 
@@ -416,6 +490,18 @@ static void update_statusbar(void)
         lv_label_set_text(s_conn_label, LV_SYMBOL_WIFI " Offline");
         break;
     }
+
+    // Settings list rows' description subtitles - live, like the mockup's
+    // "value" line, not decorative filler text.
+    if (snapshot.state == WIFI_MANAGER_STATE_CONNECTED)
+    {
+        lv_label_set_text_fmt(s_settings_wifi_row_desc, "Connected to %s", snapshot.active_ssid);
+    }
+    else
+    {
+        lv_label_set_text(s_settings_wifi_row_desc, "Not connected");
+    }
+    lv_label_set_text(s_settings_locale_row_desc, s_locale.time_24h ? "24-hour clock" : "12-hour clock");
 }
 
 static void update_wifi_screen(void); // defined further down, alongside the rest of the Wi-Fi screen
@@ -514,7 +600,9 @@ static void build_statusbar(lv_obj_t *screen)
     // remove_style_all also dropped the button's own default centering
     // layout, so that's reapplied explicitly too.
     lv_obj_set_height(nav_btn, STATUSBAR_HEIGHT_PX);
-    lv_obj_set_width(nav_btn, LV_SIZE_CONTENT);
+    // Fixed (not content-fitting) width: "Settings"/"Exit" must not resize
+    // the button (and shift its position) when the label text changes.
+    lv_obj_set_width(nav_btn, NAV_BUTTON_WIDTH_PX);
     lv_obj_set_flex_flow(nav_btn, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(nav_btn, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     // A label-sized hit target is as hard to tap as a hyperlink - pad the
@@ -527,7 +615,9 @@ static void build_statusbar(lv_obj_t *screen)
     lv_obj_set_ext_click_area(nav_btn, 16);
     lv_obj_add_event_cb(nav_btn, nav_click_cb, LV_EVENT_CLICKED, NULL);
     s_nav_label = lv_label_create(nav_btn);
-    lv_obj_set_style_text_color(s_nav_label, COLOR_ACCENT, 0);
+    // Muted, not accent - this is secondary nav text (matches the mockup's
+    // own subheader back-arrow color), not an interactive accent highlight.
+    lv_obj_set_style_text_color(s_nav_label, COLOR_MUTED, 0);
     lv_obj_set_style_text_font(s_nav_label, &lv_font_montserrat_14, 0);
     lv_label_set_text(s_nav_label, LV_SYMBOL_SETTINGS " Settings");
 }
@@ -586,10 +676,11 @@ static void style_dark_keyboard(lv_obj_t *kb)
     lv_obj_set_style_text_color(kb, lv_color_hex(0x04141C), LV_PART_ITEMS | LV_STATE_CHECKED);
 }
 
-// A tappable row: title on the left, a chevron on the right. Caller attaches
-// its own click handler; more Settings rows (Wi-Fi, watchlist, updates) land
-// in later slices.
-static lv_obj_t *build_settings_row(lv_obj_t *parent, const char *title, lv_event_cb_t click_cb)
+// A tappable row matching the reviewed design: a 40x40 icon chip, a title +
+// description column, and a chevron. Returns the description label so the
+// caller can keep it updated with live state (Wi-Fi status, clock format).
+static lv_obj_t *build_settings_row(lv_obj_t *parent, const char *icon_symbol, const char *title, const char *desc,
+                                     lv_event_cb_t click_cb)
 {
     lv_obj_t *row = lv_obj_create(parent);
     lv_obj_remove_style_all(row);
@@ -600,21 +691,49 @@ static lv_obj_t *build_settings_row(lv_obj_t *parent, const char *title, lv_even
     lv_obj_set_flex_align(row, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_left(row, 20, 0);
     lv_obj_set_style_pad_right(row, 20, 0);
+    lv_obj_set_style_pad_column(row, 16, 0);
     lv_obj_set_style_border_side(row, LV_BORDER_SIDE_BOTTOM, 0);
     lv_obj_set_style_border_width(row, 1, 0);
     lv_obj_set_style_border_color(row, COLOR_HAIRLINE, 0);
     lv_obj_add_event_cb(row, click_cb, LV_EVENT_CLICKED, NULL);
 
-    lv_obj_t *title_label = lv_label_create(row);
+    lv_obj_t *chip = lv_obj_create(row);
+    lv_obj_remove_style_all(chip);
+    make_plain_container(chip);
+    lv_obj_set_size(chip, SETTINGS_ICON_CHIP_PX, SETTINGS_ICON_CHIP_PX);
+    lv_obj_set_style_radius(chip, 10, 0);
+    lv_obj_set_style_bg_color(chip, COLOR_HAIRLINE, 0);
+    lv_obj_set_style_bg_opa(chip, LV_OPA_COVER, 0);
+    lv_obj_set_flex_flow(chip, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(chip, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+
+    lv_obj_t *icon = lv_label_create(chip);
+    lv_obj_set_style_text_color(icon, COLOR_ACCENT, 0); // the one place accent-blue is correct: a chip, not nav text
+    lv_label_set_text(icon, icon_symbol);
+
+    lv_obj_t *body = lv_obj_create(row);
+    lv_obj_remove_style_all(body);
+    make_plain_container(body);
+    lv_obj_set_flex_grow(body, 1);
+    lv_obj_set_height(body, LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(body, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_row(body, 5, 0);
+
+    lv_obj_t *title_label = lv_label_create(body);
     lv_obj_set_style_text_color(title_label, COLOR_TEXT, 0);
     lv_obj_set_style_text_font(title_label, &lv_font_montserrat_16, 0);
     lv_label_set_text(title_label, title);
+
+    lv_obj_t *desc_label = lv_label_create(body);
+    lv_obj_set_style_text_color(desc_label, COLOR_MUTED, 0);
+    lv_obj_set_style_text_font(desc_label, &lv_font_montserrat_12, 0);
+    lv_label_set_text(desc_label, desc);
 
     lv_obj_t *chevron = lv_label_create(row);
     lv_obj_set_style_text_color(chevron, COLOR_MUTED, 0);
     lv_label_set_text(chevron, LV_SYMBOL_RIGHT);
 
-    return row;
+    return desc_label;
 }
 
 // A sub-screen header: back arrow (calling back_cb) + title, matching the
@@ -644,7 +763,7 @@ static void build_subscreen_header(lv_obj_t *parent, const char *title, lv_event
     lv_obj_add_event_cb(back_btn, back_cb, LV_EVENT_CLICKED, NULL);
 
     lv_obj_t *back_icon = lv_label_create(back_btn);
-    lv_obj_set_style_text_color(back_icon, COLOR_ACCENT, 0);
+    lv_obj_set_style_text_color(back_icon, COLOR_MUTED, 0);
     lv_obj_set_style_text_font(back_icon, &lv_font_montserrat_16, 0);
     lv_label_set_text(back_icon, LV_SYMBOL_LEFT);
 
@@ -736,32 +855,23 @@ static void build_wifi_ap_row(const wifi_manager_ap_t *ap)
 // Rebuilds the whole AP list every call rather than diffing - simplest
 // correct option, and only runs while the Wi-Fi screen is actually visible
 // (see update_timer_cb()), so the cost is bounded to whenever the user is
-// looking at this screen.
+// looking at this screen. Connection status itself lives only in the
+// per-row "Connected"/"Saved"/"Tap to connect" text and the bottom status
+// bar - no separate status banner, matching the reviewed design.
+#define WIFI_AUTO_RESCAN_TICKS 7 // ~7s between automatic background rescans
+
 static void update_wifi_screen(void)
 {
+    static uint8_t s_rescan_tick;
+    if (++s_rescan_tick >= WIFI_AUTO_RESCAN_TICKS)
+    {
+        s_rescan_tick = 0;
+        wifi_manager_scan_async();
+    }
+
     if (wifi_manager_get_snapshot(&s_wifi_snapshot) != ESP_OK)
     {
         return;
-    }
-
-    switch (s_wifi_snapshot.state)
-    {
-    case WIFI_MANAGER_STATE_CONNECTED:
-        lv_obj_set_style_text_color(s_wifi_status_label, COLOR_UP, 0);
-        lv_label_set_text_fmt(s_wifi_status_label, LV_SYMBOL_WIFI " Connected to %s", s_wifi_snapshot.active_ssid);
-        break;
-    case WIFI_MANAGER_STATE_CONNECTING:
-        lv_obj_set_style_text_color(s_wifi_status_label, COLOR_WARN, 0);
-        lv_label_set_text_fmt(s_wifi_status_label, LV_SYMBOL_WIFI " Connecting to %s...", s_wifi_snapshot.active_ssid);
-        break;
-    case WIFI_MANAGER_STATE_ERROR:
-        lv_obj_set_style_text_color(s_wifi_status_label, COLOR_WARN, 0);
-        lv_label_set_text(s_wifi_status_label, LV_SYMBOL_WIFI " Connection failed");
-        break;
-    default:
-        lv_obj_set_style_text_color(s_wifi_status_label, COLOR_MUTED, 0);
-        lv_label_set_text(s_wifi_status_label, LV_SYMBOL_WIFI " Not connected");
-        break;
     }
 
     lv_obj_clean(s_wifi_list);
@@ -777,12 +887,6 @@ static void update_wifi_screen(void)
     {
         build_wifi_ap_row(&s_wifi_snapshot.aps[i]);
     }
-}
-
-static void wifi_rescan_cb(lv_event_t *e)
-{
-    (void)e;
-    wifi_manager_scan_async();
 }
 
 static void wifi_row_click_cb(lv_event_t *e)
@@ -802,38 +906,15 @@ static void build_wifi_screen(lv_obj_t *screen)
 
     build_subscreen_header(s_wifi_screen, "Wi-Fi", settings_back_cb);
 
-    lv_obj_t *status_row = lv_obj_create(s_wifi_screen);
-    lv_obj_remove_style_all(status_row);
-    make_plain_container(status_row);
-    lv_obj_set_size(status_row, LV_PCT(100), LV_SIZE_CONTENT);
-    lv_obj_set_flex_flow(status_row, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(status_row, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_left(status_row, 20, 0);
-    lv_obj_set_style_pad_right(status_row, 20, 0);
-    lv_obj_set_style_pad_top(status_row, 14, 0);
-    lv_obj_set_style_pad_bottom(status_row, 14, 0);
-
-    s_wifi_status_label = lv_label_create(status_row);
-    lv_obj_set_style_text_font(s_wifi_status_label, &lv_font_montserrat_14, 0);
-    lv_label_set_text(s_wifi_status_label, LV_SYMBOL_WIFI " --");
-
-    lv_obj_t *rescan_btn = lv_button_create(status_row);
-    lv_obj_remove_style_all(rescan_btn);
-    make_plain_container(rescan_btn);
-    lv_obj_add_flag(rescan_btn, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_set_height(rescan_btn, 32);
-    lv_obj_set_width(rescan_btn, LV_SIZE_CONTENT);
-    lv_obj_set_flex_flow(rescan_btn, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(rescan_btn, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_left(rescan_btn, 8, 0);
-    lv_obj_set_style_pad_right(rescan_btn, 8, 0);
-    lv_obj_set_ext_click_area(rescan_btn, 10);
-    lv_obj_add_event_cb(rescan_btn, wifi_rescan_cb, LV_EVENT_CLICKED, NULL);
-
-    lv_obj_t *rescan_label = lv_label_create(rescan_btn);
-    lv_obj_set_style_text_color(rescan_label, COLOR_ACCENT, 0);
-    lv_obj_set_style_text_font(rescan_label, &lv_font_montserrat_14, 0);
-    lv_label_set_text(rescan_label, LV_SYMBOL_REFRESH " Rescan");
+    // Matches the mockup's .section-label: a small uppercase muted heading
+    // above the network list, not a status banner.
+    lv_obj_t *section_label = lv_label_create(s_wifi_screen);
+    lv_obj_set_style_text_color(section_label, lv_color_hex(0x565C67), 0);
+    lv_obj_set_style_text_font(section_label, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_pad_left(section_label, 20, 0);
+    lv_obj_set_style_pad_top(section_label, 14, 0);
+    lv_obj_set_style_pad_bottom(section_label, 6, 0);
+    lv_label_set_text(section_label, "NETWORKS");
 
     s_wifi_list = lv_obj_create(s_wifi_screen);
     lv_obj_remove_style_all(s_wifi_list);
@@ -920,8 +1001,30 @@ static void build_settings_list(lv_obj_t *screen)
     lv_obj_set_size(s_settings_list, LV_PCT(100), BOARD_JC4880P443C_LCD_V_RES - STATUSBAR_HEIGHT_PX);
     lv_obj_set_flex_flow(s_settings_list, LV_FLEX_FLOW_COLUMN);
 
-    build_settings_row(s_settings_list, LV_SYMBOL_WIFI " Wi-Fi", wifi_row_click_cb);
-    build_settings_row(s_settings_list, LV_SYMBOL_SETTINGS " Date & time", locale_row_click_cb);
+    // Top-level header: title only, no back arrow (unlike sub-screens - this
+    // *is* the top level within Settings).
+    lv_obj_t *header = lv_obj_create(s_settings_list);
+    lv_obj_remove_style_all(header);
+    make_plain_container(header);
+    lv_obj_set_size(header, LV_PCT(100), SETTINGS_LIST_HEADER_HEIGHT_PX);
+    lv_obj_set_flex_flow(header, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(header, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_left(header, 20, 0);
+    lv_obj_set_style_border_side(header, LV_BORDER_SIDE_BOTTOM, 0);
+    lv_obj_set_style_border_width(header, 1, 0);
+    lv_obj_set_style_border_color(header, COLOR_HAIRLINE, 0);
+
+    lv_obj_t *header_title = lv_label_create(header);
+    lv_obj_set_style_text_color(header_title, COLOR_TEXT, 0);
+    lv_obj_set_style_text_font(header_title, &lv_font_montserrat_18, 0);
+    lv_label_set_text(header_title, "Settings");
+
+    s_settings_wifi_row_desc =
+        build_settings_row(s_settings_list, LV_SYMBOL_WIFI, "Wi-Fi", "--", wifi_row_click_cb);
+    // LVGL's built-in symbol set has no clock/calendar glyph - the gear is
+    // the closest available placeholder, not a dedicated "date & time" icon.
+    s_settings_locale_row_desc =
+        build_settings_row(s_settings_list, LV_SYMBOL_SETTINGS, "Date & time", "--", locale_row_click_cb);
 }
 
 static void locale_24h_toggle_cb(lv_event_t *e)
