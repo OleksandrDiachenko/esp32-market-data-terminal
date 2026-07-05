@@ -10,6 +10,7 @@
 #include "wifi_manager.h"
 
 #include "esp_log.h"
+#include "esp_ota_ops.h"
 
 static const char *TAG = "market_terminal";
 
@@ -33,6 +34,17 @@ void app_main(void)
     {
         ESP_LOGE(TAG, "Display UI failed to start");
         return;
+    }
+
+    // Confirms this boot as workable now that the core (non-best-effort)
+    // startup path above has run without crashing/looping - a prerequisite
+    // for a newly OTA-flashed image (see docs/decisions/0006). A no-op if
+    // rollback support is disabled or this boot wasn't pending verification
+    // (e.g. a factory flash), so failure here is logged but never fatal.
+    esp_err_t mark_valid_err = esp_ota_mark_app_valid_cancel_rollback();
+    if (mark_valid_err != ESP_OK)
+    {
+        ESP_LOGW(TAG, "esp_ota_mark_app_valid_cancel_rollback: %s", esp_err_to_name(mark_valid_err));
     }
 
     // Wi-Fi is not required for the UI to be useful; a failed link must not
