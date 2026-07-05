@@ -196,6 +196,24 @@ manual (from the Phase 11 Settings screen) plus a periodic background
 check that only sets an "update available" indicator - no silent
 auto-flash.
 
+Delivery plan (same PR-per-slice approach as Phase 5's Wi-Fi bring-up and
+Phase 11's dashboard UI - this phase-level checklist is the combined
+Definition of Done, not one PR):
+1. ADR + partition table - `ota_0`/`ota_1` layout (replacing `factory`),
+   firmware versioning scheme, `esp_http_client_config_t.buffer_size`
+   sizing for GitHub's redirect `Location` header
+2. OTA client: release check + image download - `/releases/latest` fetch,
+   version-tag parsing/comparison, `esp_https_ota` flash (same
+   TLS/`esp_crt_bundle_attach` pattern as `market_data_client`)
+3. Background periodic check + manual trigger - "update available" flag
+   in `app_state`, CLI/log-driven "check now"/"update now" until Phase
+   11's Settings screen exists
+4. Rollback safety - `esp_ota_mark_app_valid_cancel_rollback()` wired into
+   startup, anti-rollback boot-loop protection
+5. Hardware validation - a real OTA flash from a GitHub release plus a
+   deliberate bad-image rollback test, closing out the acceptance
+   criteria below
+
 Acceptance criteria:
 - [ ] ADR documenting the approach: `ota_0`/`ota_1` partition table (the
       existing ~9 MB gap in `partitions.csv` between `factory`'s end and
