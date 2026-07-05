@@ -12,6 +12,8 @@
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include <time.h>
 
 static const char *TAG = "display_ui";
@@ -19,6 +21,8 @@ static const char *TAG = "display_ui";
 #define ROW_HEIGHT_PX 76
 #define ROW_SIDE_COL_WIDTH_PX 128
 #define STATUSBAR_HEIGHT_PX 40
+#define SETTINGS_ROW_HEIGHT_PX 64
+#define SUBHEADER_HEIGHT_PX 56
 #define UPDATE_PERIOD_MS 1000
 
 #define COLOR_INK lv_color_hex(0x0A0C10)
@@ -36,6 +40,14 @@ typedef enum
     DISPLAY_UI_SCREEN_WATCHLIST = 0,
     DISPLAY_UI_SCREEN_SETTINGS,
 } display_ui_screen_t;
+
+// Which Settings sub-screen is showing. More views (Wi-Fi, watchlist
+// management, updates) land in later Phase 11 slices.
+typedef enum
+{
+    SETTINGS_VIEW_LIST = 0,
+    SETTINGS_VIEW_LOCALE,
+} settings_view_t;
 
 // One LVGL row per watchlist symbol. Built once per (re)load of the
 // watchlist (see rebuild_rows_if_needed()); every subsequent timer tick only
@@ -56,15 +68,19 @@ static display_ui_row_t s_rows[APP_STATE_MAX_SYMBOLS];
 static uint8_t s_row_count;
 static lv_timer_t *s_update_timer;
 
-static lv_obj_t *s_settings_screen;
+static lv_obj_t *s_settings_list;
 static lv_obj_t *s_clock_label;
 static lv_obj_t *s_conn_label;
 static lv_obj_t *s_nav_label;
 static display_ui_screen_t s_active_screen;
+static settings_view_t s_settings_view;
 
-// Loaded once at startup: the Settings screen that will let this change live
-// doesn't exist until a later Phase 11 slice, so there is nothing to reload
-// from yet.
+static lv_obj_t *s_locale_screen;
+static lv_obj_t *s_locale_tz_input;
+static lv_obj_t *s_locale_keyboard;
+
+// Loaded once at startup; kept up to date by locale_24h_toggle_cb()/
+// locale_tz_ready_cb() as the Locale screen saves changes.
 static locale_settings_t s_locale;
 
 // Reused scratch buffers: avoids per-tick dynamic allocation (AGENTS.md: no
@@ -279,6 +295,18 @@ static void update_row(uint8_t index)
     }
 }
 
+// Shows exactly one of the Settings sub-screens, hiding the rest. Only
+// meaningful while DISPLAY_UI_SCREEN_SETTINGS is active.
+static void show_settings_view(settings_view_t view)
+{
+    s_settings_view = view;
+    lv_obj_add_flag(s_settings_list, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(s_locale_screen, LV_OBJ_FLAG_HIDDEN);
+
+    lv_obj_t *target = (view == SETTINGS_VIEW_LOCALE) ? s_locale_screen : s_settings_list;
+    lv_obj_remove_flag(target, LV_OBJ_FLAG_HIDDEN);
+}
+
 static void set_active_screen(display_ui_screen_t screen)
 {
     s_active_screen = screen;
@@ -286,24 +314,33 @@ static void set_active_screen(display_ui_screen_t screen)
     if (screen == DISPLAY_UI_SCREEN_WATCHLIST)
     {
         lv_obj_remove_flag(s_rows_container, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_add_flag(s_settings_screen, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(s_settings_list, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(s_locale_screen, LV_OBJ_FLAG_HIDDEN);
         lv_label_set_text(s_nav_label, LV_SYMBOL_SETTINGS " Settings");
     }
     else
     {
         lv_obj_add_flag(s_rows_container, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_remove_flag(s_settings_screen, LV_OBJ_FLAG_HIDDEN);
+        show_settings_view(SETTINGS_VIEW_LIST); // always re-enter Settings at its top level
         lv_label_set_text(s_nav_label, LV_SYMBOL_LEFT " Exit");
     }
 }
 
 // One button, context-dependent: "Settings" while on the watchlist, "Exit"
-// while on Settings - not two persistent tabs.
+// (back to the watchlist, from anywhere in Settings) while on Settings -
+// not two persistent tabs. Each Settings sub-screen has its own back
+// control for stepping back one level instead.
 static void nav_click_cb(lv_event_t *e)
 {
     (void)e;
     set_active_screen(s_active_screen == DISPLAY_UI_SCREEN_WATCHLIST ? DISPLAY_UI_SCREEN_SETTINGS
                                                                       : DISPLAY_UI_SCREEN_WATCHLIST);
+}
+
+static void settings_back_cb(lv_event_t *e)
+{
+    (void)e;
+    show_settings_view(SETTINGS_VIEW_LIST);
 }
 
 static void update_statusbar(void)
@@ -455,17 +492,192 @@ static void build_statusbar(lv_obj_t *screen)
     lv_label_set_text(s_nav_label, LV_SYMBOL_SETTINGS " Settings");
 }
 
-static void build_settings_placeholder(lv_obj_t *screen)
+// Strips the same interactive-container defaults from a plain lv_obj_create()
+// as build_statusbar()'s bar/right containers - see the comment there. Kept
+// as a helper here since Settings adds several more such containers.
+static void make_plain_container(lv_obj_t *obj)
 {
-    s_settings_screen = lv_obj_create(screen);
-    lv_obj_remove_style_all(s_settings_screen);
-    lv_obj_set_size(s_settings_screen, LV_PCT(100), BOARD_JC4880P443C_LCD_V_RES - STATUSBAR_HEIGHT_PX);
-    lv_obj_set_flex_flow(s_settings_screen, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_flex_align(s_settings_screen, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_remove_flag(obj, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CLICK_FOCUSABLE | LV_OBJ_FLAG_SCROLLABLE |
+                                LV_OBJ_FLAG_SCROLL_ELASTIC | LV_OBJ_FLAG_SCROLL_MOMENTUM | LV_OBJ_FLAG_SCROLL_CHAIN |
+                                LV_OBJ_FLAG_SCROLL_WITH_ARROW | LV_OBJ_FLAG_SNAPPABLE | LV_OBJ_FLAG_PRESS_LOCK |
+                                LV_OBJ_FLAG_GESTURE_BUBBLE);
+}
 
-    lv_obj_t *label = lv_label_create(s_settings_screen);
-    lv_obj_set_style_text_color(label, COLOR_MUTED, 0);
-    lv_label_set_text(label, "Settings - coming in a later Phase 11 slice");
+// A tappable row: title on the left, a chevron on the right. Caller attaches
+// its own click handler; more Settings rows (Wi-Fi, watchlist, updates) land
+// in later slices.
+static lv_obj_t *build_settings_row(lv_obj_t *parent, const char *title, lv_event_cb_t click_cb)
+{
+    lv_obj_t *row = lv_obj_create(parent);
+    lv_obj_remove_style_all(row);
+    make_plain_container(row);
+    lv_obj_add_flag(row, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_size(row, LV_PCT(100), SETTINGS_ROW_HEIGHT_PX);
+    lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(row, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_left(row, 20, 0);
+    lv_obj_set_style_pad_right(row, 20, 0);
+    lv_obj_set_style_border_side(row, LV_BORDER_SIDE_BOTTOM, 0);
+    lv_obj_set_style_border_width(row, 1, 0);
+    lv_obj_set_style_border_color(row, COLOR_HAIRLINE, 0);
+    lv_obj_add_event_cb(row, click_cb, LV_EVENT_CLICKED, NULL);
+
+    lv_obj_t *title_label = lv_label_create(row);
+    lv_obj_set_style_text_color(title_label, COLOR_TEXT, 0);
+    lv_obj_set_style_text_font(title_label, &lv_font_montserrat_16, 0);
+    lv_label_set_text(title_label, title);
+
+    lv_obj_t *chevron = lv_label_create(row);
+    lv_obj_set_style_text_color(chevron, COLOR_MUTED, 0);
+    lv_label_set_text(chevron, LV_SYMBOL_RIGHT);
+
+    return row;
+}
+
+// A sub-screen header: back arrow (calling back_cb) + title, matching the
+// reviewed design. Reused by every Settings sub-screen.
+static void build_subscreen_header(lv_obj_t *parent, const char *title, lv_event_cb_t back_cb)
+{
+    lv_obj_t *header = lv_obj_create(parent);
+    lv_obj_remove_style_all(header);
+    make_plain_container(header);
+    lv_obj_set_size(header, LV_PCT(100), SUBHEADER_HEIGHT_PX);
+    lv_obj_set_flex_flow(header, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(header, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_left(header, 8, 0);
+    lv_obj_set_style_pad_column(header, 10, 0);
+    lv_obj_set_style_border_side(header, LV_BORDER_SIDE_BOTTOM, 0);
+    lv_obj_set_style_border_width(header, 1, 0);
+    lv_obj_set_style_border_color(header, COLOR_HAIRLINE, 0);
+
+    lv_obj_t *back_btn = lv_button_create(header);
+    lv_obj_remove_style_all(back_btn);
+    make_plain_container(back_btn);
+    lv_obj_add_flag(back_btn, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_size(back_btn, 40, 40);
+    lv_obj_set_flex_flow(back_btn, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(back_btn, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_ext_click_area(back_btn, 10);
+    lv_obj_add_event_cb(back_btn, back_cb, LV_EVENT_CLICKED, NULL);
+
+    lv_obj_t *back_icon = lv_label_create(back_btn);
+    lv_obj_set_style_text_color(back_icon, COLOR_ACCENT, 0);
+    lv_obj_set_style_text_font(back_icon, &lv_font_montserrat_16, 0);
+    lv_label_set_text(back_icon, LV_SYMBOL_LEFT);
+
+    lv_obj_t *title_label = lv_label_create(header);
+    lv_obj_set_style_text_color(title_label, COLOR_TEXT, 0);
+    lv_obj_set_style_text_font(title_label, &lv_font_montserrat_16, 0);
+    lv_label_set_text(title_label, title);
+}
+
+static void wifi_row_click_cb(lv_event_t *e)
+{
+    (void)e;
+    // Wi-Fi connectivity UI lands in the next slice.
+}
+
+static void locale_row_click_cb(lv_event_t *e)
+{
+    (void)e;
+    show_settings_view(SETTINGS_VIEW_LOCALE);
+}
+
+static void build_settings_list(lv_obj_t *screen)
+{
+    s_settings_list = lv_obj_create(screen);
+    lv_obj_remove_style_all(s_settings_list);
+    make_plain_container(s_settings_list);
+    lv_obj_set_size(s_settings_list, LV_PCT(100), BOARD_JC4880P443C_LCD_V_RES - STATUSBAR_HEIGHT_PX);
+    lv_obj_set_flex_flow(s_settings_list, LV_FLEX_FLOW_COLUMN);
+
+    build_settings_row(s_settings_list, LV_SYMBOL_WIFI " Wi-Fi", wifi_row_click_cb);
+    build_settings_row(s_settings_list, LV_SYMBOL_SETTINGS " Date & time", locale_row_click_cb);
+}
+
+static void locale_24h_toggle_cb(lv_event_t *e)
+{
+    lv_obj_t *toggle = lv_event_get_target(e);
+    s_locale.time_24h = lv_obj_has_state(toggle, LV_STATE_CHECKED);
+    settings_store_save_locale(&s_locale);
+}
+
+static void locale_tz_focus_cb(lv_event_t *e)
+{
+    (void)e;
+    lv_keyboard_set_textarea(s_locale_keyboard, s_locale_tz_input);
+    lv_obj_remove_flag(s_locale_keyboard, LV_OBJ_FLAG_HIDDEN);
+}
+
+// Fires when the keyboard's own Enter/checkmark key is tapped - saves and
+// applies the new zone immediately (mirrors time_sync_start()'s own
+// setenv()+tzset(), so the clock updates without a reboot).
+static void locale_tz_ready_cb(lv_event_t *e)
+{
+    (void)e;
+    const char *text = lv_textarea_get_text(s_locale_tz_input);
+    strncpy(s_locale.posix_tz, text, SETTINGS_POSIX_TZ_MAX_LEN);
+    s_locale.posix_tz[SETTINGS_POSIX_TZ_MAX_LEN] = '\0';
+    settings_store_save_locale(&s_locale);
+    setenv("TZ", s_locale.posix_tz, 1);
+    tzset();
+    lv_obj_add_flag(s_locale_keyboard, LV_OBJ_FLAG_HIDDEN);
+}
+
+static void build_locale_screen(lv_obj_t *screen)
+{
+    s_locale_screen = lv_obj_create(screen);
+    lv_obj_remove_style_all(s_locale_screen);
+    make_plain_container(s_locale_screen);
+    lv_obj_set_size(s_locale_screen, LV_PCT(100), BOARD_JC4880P443C_LCD_V_RES - STATUSBAR_HEIGHT_PX);
+    lv_obj_set_flex_flow(s_locale_screen, LV_FLEX_FLOW_COLUMN);
+
+    build_subscreen_header(s_locale_screen, "Date & time", settings_back_cb);
+
+    lv_obj_t *toggle_row = lv_obj_create(s_locale_screen);
+    lv_obj_remove_style_all(toggle_row);
+    make_plain_container(toggle_row);
+    lv_obj_set_size(toggle_row, LV_PCT(100), SETTINGS_ROW_HEIGHT_PX);
+    lv_obj_set_flex_flow(toggle_row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(toggle_row, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_left(toggle_row, 20, 0);
+    lv_obj_set_style_pad_right(toggle_row, 20, 0);
+    lv_obj_set_style_border_side(toggle_row, LV_BORDER_SIDE_BOTTOM, 0);
+    lv_obj_set_style_border_width(toggle_row, 1, 0);
+    lv_obj_set_style_border_color(toggle_row, COLOR_HAIRLINE, 0);
+
+    lv_obj_t *toggle_label = lv_label_create(toggle_row);
+    lv_obj_set_style_text_color(toggle_label, COLOR_TEXT, 0);
+    lv_obj_set_style_text_font(toggle_label, &lv_font_montserrat_16, 0);
+    lv_label_set_text(toggle_label, "24-hour clock");
+
+    lv_obj_t *toggle = lv_switch_create(toggle_row);
+    if (s_locale.time_24h)
+    {
+        lv_obj_add_state(toggle, LV_STATE_CHECKED);
+    }
+    lv_obj_add_event_cb(toggle, locale_24h_toggle_cb, LV_EVENT_VALUE_CHANGED, NULL);
+
+    lv_obj_t *tz_label = lv_label_create(s_locale_screen);
+    lv_obj_set_style_text_color(tz_label, COLOR_MUTED, 0);
+    lv_obj_set_style_text_font(tz_label, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_pad_top(tz_label, 14, 0);
+    lv_obj_set_style_pad_left(tz_label, 20, 0);
+    lv_label_set_text(tz_label, "TIME ZONE (POSIX TZ STRING)");
+
+    s_locale_tz_input = lv_textarea_create(s_locale_screen);
+    lv_textarea_set_one_line(s_locale_tz_input, true);
+    lv_textarea_set_max_length(s_locale_tz_input, SETTINGS_POSIX_TZ_MAX_LEN);
+    lv_textarea_set_placeholder_text(s_locale_tz_input, "e.g. UTC0 or EST5EDT,M3.2.0,M11.1.0");
+    lv_obj_set_size(s_locale_tz_input, LV_PCT(90), LV_SIZE_CONTENT);
+    lv_obj_set_style_margin_left(s_locale_tz_input, 20, 0);
+    lv_obj_set_style_margin_top(s_locale_tz_input, 6, 0);
+    lv_obj_add_event_cb(s_locale_tz_input, locale_tz_focus_cb, LV_EVENT_FOCUSED, NULL);
+    lv_obj_add_event_cb(s_locale_tz_input, locale_tz_ready_cb, LV_EVENT_READY, NULL);
+
+    s_locale_keyboard = lv_keyboard_create(s_locale_screen);
+    lv_keyboard_set_mode(s_locale_keyboard, LV_KEYBOARD_MODE_TEXT_LOWER);
+    lv_obj_add_flag(s_locale_keyboard, LV_OBJ_FLAG_HIDDEN);
 }
 
 static void display_ui_render(void)
@@ -480,10 +692,12 @@ static void display_ui_render(void)
     lv_obj_set_size(s_rows_container, LV_PCT(100), BOARD_JC4880P443C_LCD_V_RES - STATUSBAR_HEIGHT_PX);
     lv_obj_set_flex_flow(s_rows_container, LV_FLEX_FLOW_COLUMN);
 
-    build_settings_placeholder(screen);
+    settings_store_load_locale(&s_locale); // build_locale_screen() below needs it for the 24h switch's initial state
+
+    build_settings_list(screen);
+    build_locale_screen(screen);
     build_statusbar(screen);
 
-    settings_store_load_locale(&s_locale);
     set_active_screen(DISPLAY_UI_SCREEN_WATCHLIST);
 
     s_row_count = 0;
