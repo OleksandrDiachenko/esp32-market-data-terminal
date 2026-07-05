@@ -186,7 +186,95 @@ Acceptance criteria:
       and fixed a hardware-only heap-corruption bug from starting the WS
       client before Wi-Fi connected)
 
-### Phase 10: Host-side tests + CI hardening
+### Phase 10: OTA firmware update via GitHub Releases
+Status: Planned
+
+Scope: `esp_https_ota` + `esp_crt_bundle_attach` (same TLS pattern as
+`market_data_client`'s REST calls), firmware artifact sourced from this
+repo's public GitHub Releases via the `/releases/latest` API. Trigger is
+manual (from the Phase 11 Settings screen) plus a periodic background
+check that only sets an "update available" indicator - no silent
+auto-flash.
+
+Delivery plan (same PR-per-slice approach as Phase 5's Wi-Fi bring-up and
+Phase 11's dashboard UI - this phase-level checklist is the combined
+Definition of Done, not one PR):
+1. ADR + partition table - `ota_0`/`ota_1` layout (replacing `factory`),
+   firmware versioning scheme, `esp_http_client_config_t.buffer_size`
+   sizing for GitHub's redirect `Location` header
+2. OTA client: release check + image download - `/releases/latest` fetch,
+   version-tag parsing/comparison, `esp_https_ota` flash (same
+   TLS/`esp_crt_bundle_attach` pattern as `market_data_client`)
+3. Background periodic check + manual trigger - "update available" flag
+   in `app_state`, CLI/log-driven "check now"/"update now" until Phase
+   11's Settings screen exists
+4. Rollback safety - `esp_ota_mark_app_valid_cancel_rollback()` wired into
+   startup, anti-rollback boot-loop protection
+5. Hardware validation - a real OTA flash from a GitHub release plus a
+   deliberate bad-image rollback test, closing out the acceptance
+   criteria below
+
+Acceptance criteria:
+- [ ] ADR documenting the approach: `ota_0`/`ota_1` partition table (the
+      existing ~9 MB gap in `partitions.csv` between `factory`'s end and
+      `nvs_keys` was reserved for this), firmware versioning scheme
+      (GitHub release tag == firmware version), `esp_http_client_config_t`
+      `buffer_size` sized for GitHub's long redirect `Location` header
+- [ ] Background periodic check of `/releases/latest` sets an
+      "update available" flag in app state, surfaced once Phase 11's
+      Settings screen exists
+- [ ] Manual "check now" / "update now" trigger (CLI/log-driven until
+      Phase 11's UI exists, then wired into Settings)
+- [ ] Rollback on a bad image validated
+      (`esp_ota_mark_app_valid_cancel_rollback` / anti-rollback boot-loop
+      protection)
+- [ ] No new secrets required (public repo, public release assets)
+- [ ] Validated on real hardware: a real OTA flash from a GitHub release,
+      plus a deliberate bad-image rollback test
+
+### Phase 11: Market data dashboard UI
+Status: Planned
+
+Scope: connect `display_ui`/LVGL to `app_state` and `settings_store` - a
+real watchlist screen instead of the current static label, plus a
+settings screen. Two screens minimum, per the reference hardware layout
+(320x480, 8 symbols, ~57px rows, 24px bottom bar) scaled up for this
+board's 480x800 panel.
+
+Delivery plan (same PR-per-slice approach as Phase 5's Wi-Fi bring-up -
+this phase-level checklist is the combined Definition of Done, not one
+PR):
+1. Watchlist rendering - LVGL row objects wired to `app_state`,
+   point-in-place updates, no Settings screen yet
+2. Navigation shell - bottom bar, Watchlist <-> Settings screen switching
+3. Settings: connectivity & locale - Wi-Fi, existing `locale_settings`
+   exposed in UI (no new `settings_store` schema)
+4. Settings: watchlist management - add/remove symbols,
+   `SETTINGS_MAX_WATCHLIST` 8->10 bump (own ADR, PSRAM impact)
+5. Settings: Updates entry - wired to Phase 10's OTA trigger
+6. Hardware validation - full watchlist + settings sweep on real
+   hardware, closing out the acceptance criteria below
+
+Acceptance criteria:
+- [ ] Watchlist: 10 rows at ~76px + a ~40px bottom bar (480x800), each row
+      a distinct LVGL object updated in place (price/change/sparkline from
+      `app_state`) - no full-list redraw per tick
+- [ ] `SETTINGS_MAX_WATCHLIST` raised from 8 to 10 in `settings_store`/
+      `app_state` - touches the PSRAM klines buffers sized in Phase 8
+      (+25% memory for the watchlist); document this change in an ADR
+      alongside this phase
+- [ ] Bottom bar: navigation between Watchlist and Settings (date/time on
+      the left, a Settings button on the right, matching the reference
+      device)
+- [ ] Settings: watchlist symbols (add/remove, within the new limit of
+      10), Wi-Fi connection, existing `locale_settings`, an "Updates"
+      entry wired to Phase 10's OTA check/trigger
+- [ ] Connection/error state (Wi-Fi down, resync in progress) is visible
+      on screen, not just in logs
+- [ ] Touch is used for real navigation (bottom bar taps, list scroll/select)
+- [ ] Validated on real hardware with live data
+
+### Phase 12: Host-side tests + CI hardening
 Status: Planned
 
 Acceptance criteria:
@@ -194,7 +282,7 @@ Acceptance criteria:
 - [ ] Parser/state machine tests added
 - [ ] CI runs host-side unit tests on push/PR
 
-### Phase 11: Portfolio polish
+### Phase 13: Portfolio polish
 Status: Planned
 
 Acceptance criteria:
