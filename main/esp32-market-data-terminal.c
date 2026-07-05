@@ -1,9 +1,11 @@
 #include "startup_diagnostics.h"
 #include "app_lifecycle.h"
 #include "app_state.h"
+#include "app_state_ota_task.h"
 #include "app_state_sync_task.h"
 #include "app_state_ws_task.h"
 #include "display_ui.h"
+#include "ota_console.h"
 #include "time_sync.h"
 #include "wifi_manager.h"
 
@@ -70,5 +72,19 @@ void app_main(void)
     if (app_state_ws_task_start() != ESP_OK)
     {
         ESP_LOGW(TAG, "Market data WebSocket task failed to start; continuing without live updates");
+    }
+
+    // OTA background check is best-effort too - a failure here only means
+    // no "update available" notice until the device restarts.
+    if (app_state_ota_task_start() != ESP_OK)
+    {
+        ESP_LOGW(TAG, "OTA background task failed to start; continuing without update checks");
+    }
+
+    // CLI/log-driven manual OTA trigger (Phase 10's roadmap scope) - a
+    // failure here is non-fatal, same as the other soft dependencies above.
+    if (ota_console_start() != ESP_OK)
+    {
+        ESP_LOGW(TAG, "OTA console failed to start; manual ota_check/ota_update commands unavailable");
     }
 }

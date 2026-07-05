@@ -25,6 +25,7 @@ typedef struct
 static SemaphoreHandle_t s_lock;
 static symbol_slot_t s_symbols[APP_STATE_MAX_SYMBOLS];
 static uint8_t s_symbol_count;
+static app_state_ota_info_t s_ota_info;
 
 esp_err_t app_state_init(void)
 {
@@ -162,6 +163,41 @@ esp_err_t app_state_apply_kline_update(uint8_t index, const market_data_kline_up
     xSemaphoreTake(s_lock, portMAX_DELAY);
     symbol_slot_t *slot = &s_symbols[index];
     app_state_kline_merge_apply(slot->klines, &slot->kline_count, APP_STATE_KLINE_CAPACITY, interval_ms, update);
+    xSemaphoreGive(s_lock);
+    return ESP_OK;
+}
+
+esp_err_t app_state_get_ota_info(app_state_ota_info_t *out_info)
+{
+    if (out_info == NULL)
+    {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    *out_info = s_ota_info;
+    xSemaphoreGive(s_lock);
+    return ESP_OK;
+}
+
+esp_err_t app_state_set_ota_info(bool update_available, const char *latest_version)
+{
+    if (update_available && latest_version == NULL)
+    {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    s_ota_info.update_available = update_available;
+    if (latest_version != NULL)
+    {
+        strncpy(s_ota_info.latest_version, latest_version, APP_STATE_OTA_VERSION_MAX_LEN - 1);
+        s_ota_info.latest_version[APP_STATE_OTA_VERSION_MAX_LEN - 1] = '\0';
+    }
+    else
+    {
+        s_ota_info.latest_version[0] = '\0';
+    }
     xSemaphoreGive(s_lock);
     return ESP_OK;
 }
