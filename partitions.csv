@@ -2,7 +2,9 @@
 # Name,     Type, SubType,  Offset,   Size, Flags
 nvs,        data, nvs,      0x9000,   24K,
 phy_init,   data, phy,      0xF000,   4K,
-factory,    app,  factory,  0x20000,  4M,
+otadata,    data, ota,      0x10000,  8K,
+ota_0,      app,  ota_0,    0x20000,  4M,
+ota_1,      app,  ota_1,    0x420000, 4M,
 nvs_keys,   data, nvs_keys, 0xD20000, 4K,   encrypted
 wifi_cfg,   data, nvs,      0xD21000, 64K,
 slave_fw,   data, 0x40,     0xD40000, 2M,
