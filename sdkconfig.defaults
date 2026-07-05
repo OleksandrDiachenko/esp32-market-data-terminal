@@ -88,3 +88,9 @@ CONFIG_SLAVE_IDF_TARGET_ESP32C6=y
 # market_data_client_fetch_klines_24h_5m_batch() for the watchlist) resume a
 # prior TLS session instead of paying a full handshake on every request.
 CONFIG_ESP_TLS_CLIENT_SESSION_TICKETS=y
+
+# Phase 11 dashboard UI: type scale needs more than the default 14px
+# Montserrat (12 for muted/range labels, 16 for ticker symbols, 18 for price).
+CONFIG_LV_FONT_MONTSERRAT_12=y
+CONFIG_LV_FONT_MONTSERRAT_16=y
+CONFIG_LV_FONT_MONTSERRAT_18=y

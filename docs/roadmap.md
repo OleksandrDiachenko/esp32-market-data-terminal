@@ -252,7 +252,7 @@ Acceptance criteria:
       `docs/validation/ota-firmware-update-hardware-test.md`
 
 ### Phase 11: Market data dashboard UI
-Status: Planned
+Status: In progress
 
 Scope: connect `display_ui`/LVGL to `app_state` and `settings_store` - a
 real watchlist screen instead of the current static label, plus a
@@ -264,7 +264,7 @@ Delivery plan (same PR-per-slice approach as Phase 5's Wi-Fi bring-up -
 this phase-level checklist is the combined Definition of Done, not one
 PR):
 1. Watchlist rendering - LVGL row objects wired to `app_state`,
-   point-in-place updates, no Settings screen yet
+   point-in-place updates, no Settings screen yet - **Done**
 2. Navigation shell - bottom bar, Watchlist <-> Settings screen switching
 3. Settings: connectivity & locale - Wi-Fi, existing `locale_settings`
    exposed in UI (no new `settings_store` schema)
