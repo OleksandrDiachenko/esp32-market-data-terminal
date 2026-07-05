@@ -265,7 +265,8 @@ this phase-level checklist is the combined Definition of Done, not one
 PR):
 1. Watchlist rendering - LVGL row objects wired to `app_state`,
    point-in-place updates, no Settings screen yet - **Done**
-2. Navigation shell - bottom bar, Watchlist <-> Settings screen switching
+2. Navigation shell - bottom bar, Watchlist <-> Settings screen switching -
+   **Done** (Settings screen is a placeholder until slices 3-5 add real content)
 3. Settings: connectivity & locale - Wi-Fi, existing `locale_settings`
    exposed in UI (no new `settings_store` schema)
 4. Settings: watchlist management - add/remove symbols,

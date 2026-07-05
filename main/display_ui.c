@@ -5,23 +5,37 @@
 #include "esp_check.h"
 #include "esp_log.h"
 #include "lvgl.h"
+#include "settings_store.h"
+#include "time_sync.h"
+#include "wifi_manager.h"
 
 #include <math.h>
+#include <stdint.h>
 #include <stdio.h>
+#include <time.h>
 
 static const char *TAG = "display_ui";
 
 #define ROW_HEIGHT_PX 76
 #define ROW_SIDE_COL_WIDTH_PX 128
+#define STATUSBAR_HEIGHT_PX 40
 #define UPDATE_PERIOD_MS 1000
 
 #define COLOR_INK lv_color_hex(0x0A0C10)
+#define COLOR_STATUSBAR_BG lv_color_hex(0x0F1216)
 #define COLOR_TEXT lv_color_hex(0xECEEF2)
 #define COLOR_MUTED lv_color_hex(0x6E7686)
 #define COLOR_UP lv_color_hex(0x2FD481)
 #define COLOR_DOWN lv_color_hex(0xFF5D6C)
 #define COLOR_WARN lv_color_hex(0xF2A93C)
 #define COLOR_HAIRLINE lv_color_hex(0x1B1F26)
+#define COLOR_ACCENT lv_color_hex(0x47C9FF)
+
+typedef enum
+{
+    DISPLAY_UI_SCREEN_WATCHLIST = 0,
+    DISPLAY_UI_SCREEN_SETTINGS,
+} display_ui_screen_t;
 
 // One LVGL row per watchlist symbol. Built once per (re)load of the
 // watchlist (see rebuild_rows_if_needed()); every subsequent timer tick only
@@ -41,6 +55,18 @@ static lv_obj_t *s_rows_container;
 static display_ui_row_t s_rows[APP_STATE_MAX_SYMBOLS];
 static uint8_t s_row_count;
 static lv_timer_t *s_update_timer;
+
+static lv_obj_t *s_settings_screen;
+static lv_obj_t *s_clock_label;
+static lv_obj_t *s_conn_label;
+static lv_obj_t *s_nav_watchlist_label;
+static lv_obj_t *s_nav_settings_label;
+static display_ui_screen_t s_active_screen;
+
+// Loaded once at startup: the Settings screen that will let this change live
+// doesn't exist until a later Phase 11 slice, so there is nothing to reload
+// from yet.
+static locale_settings_t s_locale;
 
 // Reused scratch buffers: avoids per-tick dynamic allocation (AGENTS.md: no
 // dynamic allocation in the hot path) and avoids putting
@@ -254,6 +280,76 @@ static void update_row(uint8_t index)
     }
 }
 
+static void set_active_screen(display_ui_screen_t screen)
+{
+    s_active_screen = screen;
+
+    if (screen == DISPLAY_UI_SCREEN_WATCHLIST)
+    {
+        lv_obj_remove_flag(s_rows_container, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(s_settings_screen, LV_OBJ_FLAG_HIDDEN);
+    }
+    else
+    {
+        lv_obj_add_flag(s_rows_container, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_remove_flag(s_settings_screen, LV_OBJ_FLAG_HIDDEN);
+    }
+
+    lv_obj_set_style_text_color(s_nav_watchlist_label, screen == DISPLAY_UI_SCREEN_WATCHLIST ? COLOR_ACCENT : COLOR_MUTED,
+                                 0);
+    lv_obj_set_style_text_color(s_nav_settings_label, screen == DISPLAY_UI_SCREEN_SETTINGS ? COLOR_ACCENT : COLOR_MUTED,
+                                 0);
+}
+
+static void nav_click_cb(lv_event_t *e)
+{
+    set_active_screen((display_ui_screen_t)(intptr_t)lv_event_get_user_data(e));
+}
+
+static void update_statusbar(void)
+{
+    if (time_sync_is_synced())
+    {
+        time_t now = time(NULL);
+        struct tm tm_now;
+        localtime_r(&now, &tm_now);
+
+        char clock_buf[24];
+        strftime(clock_buf, sizeof(clock_buf), s_locale.time_24h ? "%d %b %Y  %H:%M" : "%d %b %Y  %I:%M %p", &tm_now);
+        lv_label_set_text(s_clock_label, clock_buf);
+    }
+    else
+    {
+        lv_label_set_text(s_clock_label, "--:--");
+    }
+
+    wifi_manager_snapshot_t snapshot;
+    if (wifi_manager_get_snapshot(&snapshot) != ESP_OK)
+    {
+        return;
+    }
+
+    switch (snapshot.state)
+    {
+    case WIFI_MANAGER_STATE_CONNECTED:
+        lv_obj_set_style_text_color(s_conn_label, COLOR_UP, 0);
+        lv_label_set_text(s_conn_label, LV_SYMBOL_WIFI " Connected");
+        break;
+    case WIFI_MANAGER_STATE_CONNECTING:
+        lv_obj_set_style_text_color(s_conn_label, COLOR_WARN, 0);
+        lv_label_set_text(s_conn_label, LV_SYMBOL_WIFI " Connecting...");
+        break;
+    case WIFI_MANAGER_STATE_ERROR:
+        lv_obj_set_style_text_color(s_conn_label, COLOR_WARN, 0);
+        lv_label_set_text(s_conn_label, LV_SYMBOL_WIFI " Reconnecting...");
+        break;
+    default:
+        lv_obj_set_style_text_color(s_conn_label, COLOR_MUTED, 0);
+        lv_label_set_text(s_conn_label, LV_SYMBOL_WIFI " Offline");
+        break;
+    }
+}
+
 static void update_timer_cb(lv_timer_t *timer)
 {
     (void)timer;
@@ -270,6 +366,68 @@ static void update_timer_cb(lv_timer_t *timer)
     {
         update_row(i);
     }
+
+    update_statusbar();
+}
+
+static void build_statusbar(lv_obj_t *screen)
+{
+    lv_obj_t *bar = lv_obj_create(screen);
+    lv_obj_remove_style_all(bar);
+    lv_obj_set_size(bar, LV_PCT(100), STATUSBAR_HEIGHT_PX);
+    lv_obj_align(bar, LV_ALIGN_BOTTOM_MID, 0, 0);
+    lv_obj_set_flex_flow(bar, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(bar, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_left(bar, 16, 0);
+    lv_obj_set_style_pad_right(bar, 16, 0);
+    lv_obj_set_style_border_side(bar, LV_BORDER_SIDE_TOP, 0);
+    lv_obj_set_style_border_width(bar, 1, 0);
+    lv_obj_set_style_border_color(bar, COLOR_HAIRLINE, 0);
+    lv_obj_set_style_bg_color(bar, COLOR_STATUSBAR_BG, 0);
+    lv_obj_set_style_bg_opa(bar, LV_OPA_COVER, 0);
+
+    s_clock_label = lv_label_create(bar);
+    lv_obj_set_style_text_color(s_clock_label, lv_color_hex(0xB7BCC5), 0);
+    lv_obj_set_style_text_font(s_clock_label, &lv_font_montserrat_12, 0);
+    lv_label_set_text(s_clock_label, "--:--");
+
+    lv_obj_t *right = lv_obj_create(bar);
+    lv_obj_remove_style_all(right);
+    lv_obj_set_height(right, LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(right, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(right, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_column(right, 16, 0);
+
+    s_conn_label = lv_label_create(right);
+    lv_obj_set_style_text_font(s_conn_label, &lv_font_montserrat_12, 0);
+    lv_label_set_text(s_conn_label, LV_SYMBOL_WIFI " --");
+
+    lv_obj_t *watchlist_btn = lv_button_create(right);
+    lv_obj_remove_style_all(watchlist_btn);
+    lv_obj_add_event_cb(watchlist_btn, nav_click_cb, LV_EVENT_CLICKED, (void *)(intptr_t)DISPLAY_UI_SCREEN_WATCHLIST);
+    s_nav_watchlist_label = lv_label_create(watchlist_btn);
+    lv_obj_set_style_text_font(s_nav_watchlist_label, &lv_font_montserrat_12, 0);
+    lv_label_set_text(s_nav_watchlist_label, LV_SYMBOL_LIST " Watchlist");
+
+    lv_obj_t *settings_btn = lv_button_create(right);
+    lv_obj_remove_style_all(settings_btn);
+    lv_obj_add_event_cb(settings_btn, nav_click_cb, LV_EVENT_CLICKED, (void *)(intptr_t)DISPLAY_UI_SCREEN_SETTINGS);
+    s_nav_settings_label = lv_label_create(settings_btn);
+    lv_obj_set_style_text_font(s_nav_settings_label, &lv_font_montserrat_12, 0);
+    lv_label_set_text(s_nav_settings_label, LV_SYMBOL_SETTINGS " Settings");
+}
+
+static void build_settings_placeholder(lv_obj_t *screen)
+{
+    s_settings_screen = lv_obj_create(screen);
+    lv_obj_remove_style_all(s_settings_screen);
+    lv_obj_set_size(s_settings_screen, LV_PCT(100), BOARD_JC4880P443C_LCD_V_RES - STATUSBAR_HEIGHT_PX);
+    lv_obj_set_flex_flow(s_settings_screen, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(s_settings_screen, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+
+    lv_obj_t *label = lv_label_create(s_settings_screen);
+    lv_obj_set_style_text_color(label, COLOR_MUTED, 0);
+    lv_label_set_text(label, "Settings - coming in a later Phase 11 slice");
 }
 
 static void display_ui_render(void)
@@ -281,8 +439,14 @@ static void display_ui_render(void)
 
     s_rows_container = lv_obj_create(screen);
     lv_obj_remove_style_all(s_rows_container);
-    lv_obj_set_size(s_rows_container, LV_PCT(100), LV_PCT(100));
+    lv_obj_set_size(s_rows_container, LV_PCT(100), BOARD_JC4880P443C_LCD_V_RES - STATUSBAR_HEIGHT_PX);
     lv_obj_set_flex_flow(s_rows_container, LV_FLEX_FLOW_COLUMN);
+
+    build_settings_placeholder(screen);
+    build_statusbar(screen);
+
+    settings_store_load_locale(&s_locale);
+    set_active_screen(DISPLAY_UI_SCREEN_WATCHLIST);
 
     s_row_count = 0;
     // app_state_init() (and thus a non-zero app_state_symbol_count()) may
