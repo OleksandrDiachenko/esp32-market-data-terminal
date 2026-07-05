@@ -223,6 +223,20 @@ settings screen. Two screens minimum, per the reference hardware layout
 (320x480, 8 symbols, ~57px rows, 24px bottom bar) scaled up for this
 board's 480x800 panel.
 
+Delivery plan (same PR-per-slice approach as Phase 5's Wi-Fi bring-up -
+this phase-level checklist is the combined Definition of Done, not one
+PR):
+1. Watchlist rendering - LVGL row objects wired to `app_state`,
+   point-in-place updates, no Settings screen yet
+2. Navigation shell - bottom bar, Watchlist <-> Settings screen switching
+3. Settings: connectivity & locale - Wi-Fi, existing `locale_settings`
+   exposed in UI (no new `settings_store` schema)
+4. Settings: watchlist management - add/remove symbols,
+   `SETTINGS_MAX_WATCHLIST` 8->10 bump (own ADR, PSRAM impact)
+5. Settings: Updates entry - wired to Phase 10's OTA trigger
+6. Hardware validation - full watchlist + settings sweep on real
+   hardware, closing out the acceptance criteria below
+
 Acceptance criteria:
 - [ ] Watchlist: 10 rows at ~76px + a ~40px bottom bar (480x800), each row
       a distinct LVGL object updated in place (price/change/sparkline from
