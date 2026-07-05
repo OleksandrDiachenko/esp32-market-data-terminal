@@ -374,6 +374,14 @@ static void build_statusbar(lv_obj_t *screen)
 {
     lv_obj_t *bar = lv_obj_create(screen);
     lv_obj_remove_style_all(bar);
+    // Base lv_obj_create() defaults add scroll/gesture/focus flags meant
+    // for interactive, scrollable containers - none apply to a plain status
+    // bar, and left enabled they can make a tap on a child register as an
+    // aborted scroll/gesture instead of a click.
+    lv_obj_remove_flag(bar, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CLICK_FOCUSABLE | LV_OBJ_FLAG_SCROLLABLE |
+                                LV_OBJ_FLAG_SCROLL_ELASTIC | LV_OBJ_FLAG_SCROLL_MOMENTUM | LV_OBJ_FLAG_SCROLL_CHAIN |
+                                LV_OBJ_FLAG_SCROLL_WITH_ARROW | LV_OBJ_FLAG_SNAPPABLE | LV_OBJ_FLAG_PRESS_LOCK |
+                                LV_OBJ_FLAG_GESTURE_BUBBLE);
     lv_obj_set_size(bar, LV_PCT(100), STATUSBAR_HEIGHT_PX);
     lv_obj_align(bar, LV_ALIGN_BOTTOM_MID, 0, 0);
     lv_obj_set_flex_flow(bar, LV_FLEX_FLOW_ROW);
@@ -393,6 +401,15 @@ static void build_statusbar(lv_obj_t *screen)
 
     lv_obj_t *right = lv_obj_create(bar);
     lv_obj_remove_style_all(right);
+    lv_obj_remove_flag(right, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CLICK_FOCUSABLE | LV_OBJ_FLAG_SCROLLABLE |
+                                   LV_OBJ_FLAG_SCROLL_ELASTIC | LV_OBJ_FLAG_SCROLL_MOMENTUM |
+                                   LV_OBJ_FLAG_SCROLL_CHAIN | LV_OBJ_FLAG_SCROLL_WITH_ARROW |
+                                   LV_OBJ_FLAG_SNAPPABLE | LV_OBJ_FLAG_PRESS_LOCK | LV_OBJ_FLAG_GESTURE_BUBBLE);
+    // Width defaults to LV_DPI_DEF (a fixed ~130px), not content-fitting -
+    // left unset, "Connected"/"Exit" (wider than the initial "--"
+    // placeholder) would overflow past that fixed box and clip on the left
+    // since this container is packed flush to the bar's right edge.
+    lv_obj_set_width(right, LV_SIZE_CONTENT);
     lv_obj_set_height(right, LV_SIZE_CONTENT);
     lv_obj_set_flex_flow(right, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(right, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
@@ -404,6 +421,15 @@ static void build_statusbar(lv_obj_t *screen)
 
     lv_obj_t *nav_btn = lv_button_create(right);
     lv_obj_remove_style_all(nav_btn);
+    // lv_button_create() still leaves several scroll/gesture/focus flags on
+    // from the base object (only SCROLLABLE itself is cleared) - none of
+    // them apply to a single-purpose nav button, and combined with the
+    // ancestors' own default flags they could make a tap register as an
+    // aborted scroll/gesture instead of a click. Only CLICKABLE is needed.
+    lv_obj_remove_flag(nav_btn, LV_OBJ_FLAG_CLICK_FOCUSABLE | LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_SCROLL_ELASTIC |
+                                    LV_OBJ_FLAG_SCROLL_MOMENTUM | LV_OBJ_FLAG_SCROLL_CHAIN |
+                                    LV_OBJ_FLAG_SCROLL_ON_FOCUS | LV_OBJ_FLAG_SCROLL_WITH_ARROW |
+                                    LV_OBJ_FLAG_SNAPPABLE | LV_OBJ_FLAG_PRESS_LOCK | LV_OBJ_FLAG_GESTURE_BUBBLE);
     // A label-sized hit target is as hard to tap as a hyperlink - pad the
     // button well past its text, then extend the touch-sensitive area
     // further still, without changing how big it looks.
