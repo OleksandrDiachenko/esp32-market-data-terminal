@@ -87,3 +87,50 @@ larger decision.
 - **Plaintext NVS for credentials:** simpler, but stores Wi-Fi passwords in
   the clear on flash; rejected given this is a device users will actually
   configure with real home network credentials.
+
+## Addendum (2026-07-05): attempted esp_hosted 2.9.3 → 2.12.9 upgrade, reverted
+
+Investigated upgrading `esp_hosted` (2.9.3 → 2.12.9), `esp_wifi_remote`
+(1.3.0 → resolver-picked 1.6.1), and ESP-IDF (6.0.1 → 6.0.2), motivated by
+an esp_hosted 2.11.0 changelog entry ("remove double freeing of buffer if
+`rx()` fails") that looked like it could fix the pre-existing vendored
+SDIO double-free documented in Phase 9's validation
+(`docs/validation/websocket-streaming-hardware-test.md`).
+
+Built and flashed cleanly (host tests all pass, `idf.py build` clean), but
+hardware boot loops every time with:
+
+```
+transport: SDIO mode: slave: streaming, host: packet
+transport: SDIO mode mismatch: slave is in streaming mode, but host is in packet mode. Aborting.
+assert failed: process_init_event transport_drv.c:881 (0)
+```
+
+**Root cause:** esp_hosted's host code added a hard SDIO-mode compatibility
+gate somewhere between 2.9.3 and 2.12.9. Our host Kconfig has always
+selected packet mode (`CONFIG_ESP_HOSTED_SDIO_OPTIMIZATION_RX_MAX_SIZE=y`,
+unchanged by this upgrade attempt) for the documented heap-fragmentation
+reason above. The ESP32-C6's already-flashed slave firmware (2.12.8,
+unchanged - this project never reflashes the C6) operates in streaming
+mode. The old host (2.9.3) only logged this as a non-fatal version-mismatch
+warning (`Host [2.9.0] < Co-proc [2.12.0]`, see
+`docs/validation/wifi-hosted-link-bring-up.md`); the new host aborts.
+
+**Reverted**: pins are back to `esp_hosted==2.9.3` / `esp_wifi_remote==1.3.0`
+/ `idf: ">=6.0.1"`, confirmed working again on hardware (Wi-Fi connects,
+WebSocket connects, REST sync succeeds) - see
+`docs/validation/esp-hosted-2.12.9-upgrade-attempt.md`.
+
+**Real paths forward, neither attempted here:**
+1. Switch the host to `CONFIG_ESP_HOSTED_SDIO_OPTIMIZATION_RX_STREAMING_MODE`
+   to match the slave - but this is the exact mode this ADR turned off
+   because it triggered heap-fragmentation asserts during long HTTPS
+   transfers, which is this project's core workload (REST/WS over TLS).
+   Would need real hardware soak-testing under load before trusting it.
+2. Reflash the ESP32-C6 with newer (packet-mode-capable) slave firmware -
+   out of scope: this project doesn't own a C6-flashing process, and the
+   C6 is shared with the sibling `siswood-air-quality` project on the same
+   physical board.
+
+Not resolving either path now; staying on 2.9.3 until one is deliberately
+scoped as its own piece of work.
