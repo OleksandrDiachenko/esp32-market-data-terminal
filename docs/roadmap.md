@@ -150,7 +150,7 @@ Acceptance criteria:
       `wifi_manager` (Phase 5) along the way - see the same report.
 
 ### Phase 9: Real-time WebSocket streaming
-Status: In progress - implementation done, hardware validation pending
+Status: Done
 
 Note: depends on Phase 8's runtime state model (live updates need
 somewhere in application state to land) and Phase 7's
@@ -179,9 +179,12 @@ Acceptance criteria:
       payload: open/high/low/close/volume, `x` close flag)
 - [x] Live candle updates land in Phase 8's runtime state model
 - [x] No API keys or secrets are required
-- [ ] Validated on real hardware: live candle ticks between REST syncs,
+- [x] Validated on real hardware: live candle ticks between REST syncs,
       volume/trade-count advance only once per closed second, graceful
-      behavior with Wi-Fi down (see `docs/validation/` once written)
+      behavior with Wi-Fi down (see
+      `docs/validation/websocket-streaming-hardware-test.md` - also caught
+      and fixed a hardware-only heap-corruption bug from starting the WS
+      client before Wi-Fi connected)
 
 ### Phase 10: Host-side tests + CI hardening
 Status: Planned
