@@ -22,7 +22,6 @@ parse tree on a device sharing RAM with the display - see
 - market data polling/orchestration service (Phase 8 — periodic polling and
   runtime state built on top of market_data_client)
 - market data WebSocket streaming (Phase 9 - live kline updates via
-  wss://stream.binance.{com,us}, layered on Phase 8's runtime state —
-  implemented, hardware validation pending, see `docs/roadmap.md` and
-  `docs/decisions/0004-websocket-streaming.md`)
+  wss://stream.binance.{com,us}, layered on Phase 8's runtime state — done,
+  see `docs/roadmap.md` and `docs/decisions/0004-websocket-streaming.md`)
 - display UI LVGL layer
