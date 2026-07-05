@@ -12,7 +12,6 @@
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
@@ -47,6 +46,8 @@ typedef enum
 {
     SETTINGS_VIEW_LIST = 0,
     SETTINGS_VIEW_LOCALE,
+    SETTINGS_VIEW_WIFI,
+    SETTINGS_VIEW_WIFI_PASSWORD,
 } settings_view_t;
 
 // One LVGL row per watchlist symbol. Built once per (re)load of the
@@ -76,12 +77,24 @@ static display_ui_screen_t s_active_screen;
 static settings_view_t s_settings_view;
 
 static lv_obj_t *s_locale_screen;
-static lv_obj_t *s_locale_tz_input;
-static lv_obj_t *s_locale_keyboard;
 
-// Loaded once at startup; kept up to date by locale_24h_toggle_cb()/
-// locale_tz_ready_cb() as the Locale screen saves changes.
+// Loaded once at startup; kept up to date by locale_24h_toggle_cb() as the
+// Locale screen saves changes.
 static locale_settings_t s_locale;
+
+static lv_obj_t *s_wifi_screen;
+static lv_obj_t *s_wifi_status_label;
+static lv_obj_t *s_wifi_list;
+// Static (not stack-local) so completed rows' click handlers can safely
+// reference "their" wifi_manager_ap_t by pointer after the function that
+// built them returns - see build_wifi_ap_row()/wifi_ap_click_cb().
+static wifi_manager_snapshot_t s_wifi_snapshot;
+
+static lv_obj_t *s_wifi_password_screen;
+static lv_obj_t *s_wifi_password_title;
+static lv_obj_t *s_wifi_password_input;
+static lv_obj_t *s_wifi_password_keyboard;
+static char s_wifi_pending_ssid[WIFI_MANAGER_SSID_MAX + 1];
 
 // Reused scratch buffers: avoids per-tick dynamic allocation (AGENTS.md: no
 // dynamic allocation in the hot path) and avoids putting
@@ -302,8 +315,24 @@ static void show_settings_view(settings_view_t view)
     s_settings_view = view;
     lv_obj_add_flag(s_settings_list, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(s_locale_screen, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(s_wifi_screen, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(s_wifi_password_screen, LV_OBJ_FLAG_HIDDEN);
 
-    lv_obj_t *target = (view == SETTINGS_VIEW_LOCALE) ? s_locale_screen : s_settings_list;
+    lv_obj_t *target = s_settings_list;
+    switch (view)
+    {
+    case SETTINGS_VIEW_LOCALE:
+        target = s_locale_screen;
+        break;
+    case SETTINGS_VIEW_WIFI:
+        target = s_wifi_screen;
+        break;
+    case SETTINGS_VIEW_WIFI_PASSWORD:
+        target = s_wifi_password_screen;
+        break;
+    default:
+        break;
+    }
     lv_obj_remove_flag(target, LV_OBJ_FLAG_HIDDEN);
 }
 
@@ -316,6 +345,8 @@ static void set_active_screen(display_ui_screen_t screen)
         lv_obj_remove_flag(s_rows_container, LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(s_settings_list, LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(s_locale_screen, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(s_wifi_screen, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(s_wifi_password_screen, LV_OBJ_FLAG_HIDDEN);
         lv_label_set_text(s_nav_label, LV_SYMBOL_SETTINGS " Settings");
     }
     else
@@ -387,6 +418,8 @@ static void update_statusbar(void)
     }
 }
 
+static void update_wifi_screen(void); // defined further down, alongside the rest of the Wi-Fi screen
+
 static void update_timer_cb(lv_timer_t *timer)
 {
     (void)timer;
@@ -405,6 +438,13 @@ static void update_timer_cb(lv_timer_t *timer)
     }
 
     update_statusbar();
+
+    // Only worth refreshing (scan results, connection state) while the
+    // user is actually looking at it.
+    if (s_active_screen == DISPLAY_UI_SCREEN_SETTINGS && s_settings_view == SETTINGS_VIEW_WIFI)
+    {
+        update_wifi_screen();
+    }
 }
 
 static void build_statusbar(lv_obj_t *screen)
@@ -571,10 +611,254 @@ static void build_subscreen_header(lv_obj_t *parent, const char *title, lv_event
     lv_label_set_text(title_label, title);
 }
 
+static void wifi_password_focus_cb(lv_event_t *e)
+{
+    (void)e;
+    lv_keyboard_set_textarea(s_wifi_password_keyboard, s_wifi_password_input);
+    lv_obj_remove_flag(s_wifi_password_keyboard, LV_OBJ_FLAG_HIDDEN);
+}
+
+// Fires both from the keyboard's own Enter/checkmark key (LV_EVENT_READY on
+// the textarea) and from the explicit "Connect" button below it.
+static void wifi_password_connect_cb(lv_event_t *e)
+{
+    (void)e;
+    wifi_manager_connect_new(s_wifi_pending_ssid, lv_textarea_get_text(s_wifi_password_input));
+    show_settings_view(SETTINGS_VIEW_WIFI); // status line there reflects connecting/connected/failed
+}
+
+// ap points into the static s_wifi_snapshot (see its declaration) - stable
+// as long as this row exists, which is only ever within the same tick that
+// filled it (update_wifi_screen() rebuilds every row on every refresh).
+static void wifi_ap_click_cb(lv_event_t *e)
+{
+    const wifi_manager_ap_t *ap = (const wifi_manager_ap_t *)lv_event_get_user_data(e);
+    if (ap->connected)
+    {
+        return; // already active
+    }
+    if (ap->saved)
+    {
+        wifi_manager_connect_saved(ap->ssid);
+        return;
+    }
+
+    strncpy(s_wifi_pending_ssid, ap->ssid, WIFI_MANAGER_SSID_MAX);
+    s_wifi_pending_ssid[WIFI_MANAGER_SSID_MAX] = '\0';
+    lv_textarea_set_text(s_wifi_password_input, "");
+    lv_label_set_text(s_wifi_password_title, s_wifi_pending_ssid);
+    show_settings_view(SETTINGS_VIEW_WIFI_PASSWORD);
+}
+
+static void build_wifi_ap_row(const wifi_manager_ap_t *ap)
+{
+    lv_obj_t *row = lv_obj_create(s_wifi_list);
+    lv_obj_remove_style_all(row);
+    make_plain_container(row);
+    lv_obj_add_flag(row, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_size(row, LV_PCT(100), 60);
+    lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(row, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_left(row, 20, 0);
+    lv_obj_set_style_pad_right(row, 20, 0);
+    lv_obj_set_style_border_side(row, LV_BORDER_SIDE_BOTTOM, 0);
+    lv_obj_set_style_border_width(row, 1, 0);
+    lv_obj_set_style_border_color(row, COLOR_HAIRLINE, 0);
+    lv_obj_add_event_cb(row, wifi_ap_click_cb, LV_EVENT_CLICKED, (void *)ap);
+
+    lv_obj_t *ssid_label = lv_label_create(row);
+    lv_obj_set_style_text_color(ssid_label, COLOR_TEXT, 0);
+    lv_obj_set_style_text_font(ssid_label, &lv_font_montserrat_16, 0);
+    lv_label_set_text(ssid_label, ap->ssid);
+
+    lv_obj_t *status_label = lv_label_create(row);
+    lv_obj_set_style_text_font(status_label, &lv_font_montserrat_14, 0);
+    if (ap->connected)
+    {
+        lv_obj_set_style_text_color(status_label, COLOR_UP, 0);
+        lv_label_set_text(status_label, "Connected");
+    }
+    else if (ap->saved)
+    {
+        lv_obj_set_style_text_color(status_label, COLOR_MUTED, 0);
+        lv_label_set_text(status_label, "Saved");
+    }
+    else
+    {
+        lv_obj_set_style_text_color(status_label, COLOR_MUTED, 0);
+        lv_label_set_text(status_label, "Tap to connect");
+    }
+}
+
+// Rebuilds the whole AP list every call rather than diffing - simplest
+// correct option, and only runs while the Wi-Fi screen is actually visible
+// (see update_timer_cb()), so the cost is bounded to whenever the user is
+// looking at this screen.
+static void update_wifi_screen(void)
+{
+    if (wifi_manager_get_snapshot(&s_wifi_snapshot) != ESP_OK)
+    {
+        return;
+    }
+
+    switch (s_wifi_snapshot.state)
+    {
+    case WIFI_MANAGER_STATE_CONNECTED:
+        lv_obj_set_style_text_color(s_wifi_status_label, COLOR_UP, 0);
+        lv_label_set_text_fmt(s_wifi_status_label, LV_SYMBOL_WIFI " Connected to %s", s_wifi_snapshot.active_ssid);
+        break;
+    case WIFI_MANAGER_STATE_CONNECTING:
+        lv_obj_set_style_text_color(s_wifi_status_label, COLOR_WARN, 0);
+        lv_label_set_text_fmt(s_wifi_status_label, LV_SYMBOL_WIFI " Connecting to %s...", s_wifi_snapshot.active_ssid);
+        break;
+    case WIFI_MANAGER_STATE_ERROR:
+        lv_obj_set_style_text_color(s_wifi_status_label, COLOR_WARN, 0);
+        lv_label_set_text(s_wifi_status_label, LV_SYMBOL_WIFI " Connection failed");
+        break;
+    default:
+        lv_obj_set_style_text_color(s_wifi_status_label, COLOR_MUTED, 0);
+        lv_label_set_text(s_wifi_status_label, LV_SYMBOL_WIFI " Not connected");
+        break;
+    }
+
+    lv_obj_clean(s_wifi_list);
+    if (s_wifi_snapshot.ap_count == 0)
+    {
+        lv_obj_t *empty = lv_label_create(s_wifi_list);
+        lv_obj_set_style_text_color(empty, COLOR_MUTED, 0);
+        lv_obj_set_style_pad_top(empty, 16, 0);
+        lv_label_set_text(empty, "Scanning...");
+        return;
+    }
+    for (uint8_t i = 0; i < s_wifi_snapshot.ap_count; i++)
+    {
+        build_wifi_ap_row(&s_wifi_snapshot.aps[i]);
+    }
+}
+
+static void wifi_rescan_cb(lv_event_t *e)
+{
+    (void)e;
+    wifi_manager_scan_async();
+}
+
 static void wifi_row_click_cb(lv_event_t *e)
 {
     (void)e;
-    // Wi-Fi connectivity UI lands in the next slice.
+    wifi_manager_scan_async();
+    show_settings_view(SETTINGS_VIEW_WIFI);
+}
+
+static void build_wifi_screen(lv_obj_t *screen)
+{
+    s_wifi_screen = lv_obj_create(screen);
+    lv_obj_remove_style_all(s_wifi_screen);
+    make_plain_container(s_wifi_screen);
+    lv_obj_set_size(s_wifi_screen, LV_PCT(100), BOARD_JC4880P443C_LCD_V_RES - STATUSBAR_HEIGHT_PX);
+    lv_obj_set_flex_flow(s_wifi_screen, LV_FLEX_FLOW_COLUMN);
+
+    build_subscreen_header(s_wifi_screen, "Wi-Fi", settings_back_cb);
+
+    lv_obj_t *status_row = lv_obj_create(s_wifi_screen);
+    lv_obj_remove_style_all(status_row);
+    make_plain_container(status_row);
+    lv_obj_set_size(status_row, LV_PCT(100), LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(status_row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(status_row, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_left(status_row, 20, 0);
+    lv_obj_set_style_pad_right(status_row, 20, 0);
+    lv_obj_set_style_pad_top(status_row, 14, 0);
+    lv_obj_set_style_pad_bottom(status_row, 14, 0);
+
+    s_wifi_status_label = lv_label_create(status_row);
+    lv_obj_set_style_text_font(s_wifi_status_label, &lv_font_montserrat_14, 0);
+    lv_label_set_text(s_wifi_status_label, LV_SYMBOL_WIFI " --");
+
+    lv_obj_t *rescan_btn = lv_button_create(status_row);
+    lv_obj_remove_style_all(rescan_btn);
+    make_plain_container(rescan_btn);
+    lv_obj_add_flag(rescan_btn, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_height(rescan_btn, 32);
+    lv_obj_set_width(rescan_btn, LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(rescan_btn, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(rescan_btn, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_left(rescan_btn, 8, 0);
+    lv_obj_set_style_pad_right(rescan_btn, 8, 0);
+    lv_obj_set_ext_click_area(rescan_btn, 10);
+    lv_obj_add_event_cb(rescan_btn, wifi_rescan_cb, LV_EVENT_CLICKED, NULL);
+
+    lv_obj_t *rescan_label = lv_label_create(rescan_btn);
+    lv_obj_set_style_text_color(rescan_label, COLOR_ACCENT, 0);
+    lv_obj_set_style_text_font(rescan_label, &lv_font_montserrat_14, 0);
+    lv_label_set_text(rescan_label, LV_SYMBOL_REFRESH " Rescan");
+
+    s_wifi_list = lv_obj_create(s_wifi_screen);
+    lv_obj_remove_style_all(s_wifi_list);
+    // Unlike this file's other plain containers, this one genuinely needs to
+    // scroll - the AP list can run longer than the screen - so only the
+    // flags that don't apply to a scrollable list are stripped.
+    lv_obj_remove_flag(s_wifi_list, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CLICK_FOCUSABLE | LV_OBJ_FLAG_PRESS_LOCK |
+                                         LV_OBJ_FLAG_GESTURE_BUBBLE | LV_OBJ_FLAG_SNAPPABLE);
+    lv_obj_set_width(s_wifi_list, LV_PCT(100));
+    lv_obj_set_flex_grow(s_wifi_list, 1);
+    lv_obj_set_flex_flow(s_wifi_list, LV_FLEX_FLOW_COLUMN);
+}
+
+static void wifi_password_back_cb(lv_event_t *e)
+{
+    (void)e;
+    show_settings_view(SETTINGS_VIEW_WIFI);
+}
+
+static void build_wifi_password_screen(lv_obj_t *screen)
+{
+    s_wifi_password_screen = lv_obj_create(screen);
+    lv_obj_remove_style_all(s_wifi_password_screen);
+    make_plain_container(s_wifi_password_screen);
+    lv_obj_set_size(s_wifi_password_screen, LV_PCT(100), BOARD_JC4880P443C_LCD_V_RES - STATUSBAR_HEIGHT_PX);
+    lv_obj_set_flex_flow(s_wifi_password_screen, LV_FLEX_FLOW_COLUMN);
+
+    build_subscreen_header(s_wifi_password_screen, "Enter password", wifi_password_back_cb);
+
+    s_wifi_password_title = lv_label_create(s_wifi_password_screen);
+    lv_obj_set_style_text_color(s_wifi_password_title, COLOR_MUTED, 0);
+    lv_obj_set_style_text_font(s_wifi_password_title, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_pad_top(s_wifi_password_title, 14, 0);
+    lv_obj_set_style_pad_left(s_wifi_password_title, 20, 0);
+
+    s_wifi_password_input = lv_textarea_create(s_wifi_password_screen);
+    lv_textarea_set_one_line(s_wifi_password_input, true);
+    lv_textarea_set_password_mode(s_wifi_password_input, true);
+    lv_textarea_set_max_length(s_wifi_password_input, WIFI_MANAGER_PASSWORD_MAX);
+    lv_textarea_set_placeholder_text(s_wifi_password_input, "Password (leave blank if open)");
+    lv_obj_set_size(s_wifi_password_input, LV_PCT(90), LV_SIZE_CONTENT);
+    lv_obj_set_style_margin_left(s_wifi_password_input, 20, 0);
+    lv_obj_set_style_margin_top(s_wifi_password_input, 10, 0);
+    lv_obj_add_event_cb(s_wifi_password_input, wifi_password_focus_cb, LV_EVENT_FOCUSED, NULL);
+    lv_obj_add_event_cb(s_wifi_password_input, wifi_password_connect_cb, LV_EVENT_READY, NULL);
+
+    lv_obj_t *connect_btn = lv_button_create(s_wifi_password_screen);
+    lv_obj_remove_style_all(connect_btn);
+    make_plain_container(connect_btn);
+    lv_obj_add_flag(connect_btn, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_size(connect_btn, LV_PCT(90), 44);
+    lv_obj_set_flex_flow(connect_btn, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(connect_btn, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_bg_color(connect_btn, COLOR_ACCENT, 0);
+    lv_obj_set_style_bg_opa(connect_btn, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(connect_btn, 9, 0);
+    lv_obj_set_style_margin_left(connect_btn, 20, 0);
+    lv_obj_set_style_margin_top(connect_btn, 16, 0);
+    lv_obj_add_event_cb(connect_btn, wifi_password_connect_cb, LV_EVENT_CLICKED, NULL);
+
+    lv_obj_t *connect_label = lv_label_create(connect_btn);
+    lv_obj_set_style_text_color(connect_label, lv_color_hex(0x04141C), 0);
+    lv_obj_set_style_text_font(connect_label, &lv_font_montserrat_16, 0);
+    lv_label_set_text(connect_label, "Connect");
+
+    s_wifi_password_keyboard = lv_keyboard_create(s_wifi_password_screen);
+    lv_keyboard_set_mode(s_wifi_password_keyboard, LV_KEYBOARD_MODE_TEXT_LOWER);
+    lv_obj_add_flag(s_wifi_password_keyboard, LV_OBJ_FLAG_HIDDEN);
 }
 
 static void locale_row_click_cb(lv_event_t *e)
@@ -600,28 +884,6 @@ static void locale_24h_toggle_cb(lv_event_t *e)
     lv_obj_t *toggle = lv_event_get_target(e);
     s_locale.time_24h = lv_obj_has_state(toggle, LV_STATE_CHECKED);
     settings_store_save_locale(&s_locale);
-}
-
-static void locale_tz_focus_cb(lv_event_t *e)
-{
-    (void)e;
-    lv_keyboard_set_textarea(s_locale_keyboard, s_locale_tz_input);
-    lv_obj_remove_flag(s_locale_keyboard, LV_OBJ_FLAG_HIDDEN);
-}
-
-// Fires when the keyboard's own Enter/checkmark key is tapped - saves and
-// applies the new zone immediately (mirrors time_sync_start()'s own
-// setenv()+tzset(), so the clock updates without a reboot).
-static void locale_tz_ready_cb(lv_event_t *e)
-{
-    (void)e;
-    const char *text = lv_textarea_get_text(s_locale_tz_input);
-    strncpy(s_locale.posix_tz, text, SETTINGS_POSIX_TZ_MAX_LEN);
-    s_locale.posix_tz[SETTINGS_POSIX_TZ_MAX_LEN] = '\0';
-    settings_store_save_locale(&s_locale);
-    setenv("TZ", s_locale.posix_tz, 1);
-    tzset();
-    lv_obj_add_flag(s_locale_keyboard, LV_OBJ_FLAG_HIDDEN);
 }
 
 static void build_locale_screen(lv_obj_t *screen)
@@ -657,27 +919,8 @@ static void build_locale_screen(lv_obj_t *screen)
         lv_obj_add_state(toggle, LV_STATE_CHECKED);
     }
     lv_obj_add_event_cb(toggle, locale_24h_toggle_cb, LV_EVENT_VALUE_CHANGED, NULL);
-
-    lv_obj_t *tz_label = lv_label_create(s_locale_screen);
-    lv_obj_set_style_text_color(tz_label, COLOR_MUTED, 0);
-    lv_obj_set_style_text_font(tz_label, &lv_font_montserrat_12, 0);
-    lv_obj_set_style_pad_top(tz_label, 14, 0);
-    lv_obj_set_style_pad_left(tz_label, 20, 0);
-    lv_label_set_text(tz_label, "TIME ZONE (POSIX TZ STRING)");
-
-    s_locale_tz_input = lv_textarea_create(s_locale_screen);
-    lv_textarea_set_one_line(s_locale_tz_input, true);
-    lv_textarea_set_max_length(s_locale_tz_input, SETTINGS_POSIX_TZ_MAX_LEN);
-    lv_textarea_set_placeholder_text(s_locale_tz_input, "e.g. UTC0 or EST5EDT,M3.2.0,M11.1.0");
-    lv_obj_set_size(s_locale_tz_input, LV_PCT(90), LV_SIZE_CONTENT);
-    lv_obj_set_style_margin_left(s_locale_tz_input, 20, 0);
-    lv_obj_set_style_margin_top(s_locale_tz_input, 6, 0);
-    lv_obj_add_event_cb(s_locale_tz_input, locale_tz_focus_cb, LV_EVENT_FOCUSED, NULL);
-    lv_obj_add_event_cb(s_locale_tz_input, locale_tz_ready_cb, LV_EVENT_READY, NULL);
-
-    s_locale_keyboard = lv_keyboard_create(s_locale_screen);
-    lv_keyboard_set_mode(s_locale_keyboard, LV_KEYBOARD_MODE_TEXT_LOWER);
-    lv_obj_add_flag(s_locale_keyboard, LV_OBJ_FLAG_HIDDEN);
+    // Time zone editing (raw POSIX TZ string) removed for now - revisiting
+    // the approach later; the switch above is all this screen does today.
 }
 
 static void display_ui_render(void)
@@ -696,6 +939,8 @@ static void display_ui_render(void)
 
     build_settings_list(screen);
     build_locale_screen(screen);
+    build_wifi_screen(screen);
+    build_wifi_password_screen(screen);
     build_statusbar(screen);
 
     set_active_screen(DISPLAY_UI_SCREEN_WATCHLIST);
