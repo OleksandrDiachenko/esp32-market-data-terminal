@@ -59,8 +59,7 @@ static lv_timer_t *s_update_timer;
 static lv_obj_t *s_settings_screen;
 static lv_obj_t *s_clock_label;
 static lv_obj_t *s_conn_label;
-static lv_obj_t *s_nav_watchlist_label;
-static lv_obj_t *s_nav_settings_label;
+static lv_obj_t *s_nav_label;
 static display_ui_screen_t s_active_screen;
 
 // Loaded once at startup: the Settings screen that will let this change live
@@ -288,22 +287,23 @@ static void set_active_screen(display_ui_screen_t screen)
     {
         lv_obj_remove_flag(s_rows_container, LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(s_settings_screen, LV_OBJ_FLAG_HIDDEN);
+        lv_label_set_text(s_nav_label, LV_SYMBOL_SETTINGS " Settings");
     }
     else
     {
         lv_obj_add_flag(s_rows_container, LV_OBJ_FLAG_HIDDEN);
         lv_obj_remove_flag(s_settings_screen, LV_OBJ_FLAG_HIDDEN);
+        lv_label_set_text(s_nav_label, LV_SYMBOL_LEFT " Exit");
     }
-
-    lv_obj_set_style_text_color(s_nav_watchlist_label, screen == DISPLAY_UI_SCREEN_WATCHLIST ? COLOR_ACCENT : COLOR_MUTED,
-                                 0);
-    lv_obj_set_style_text_color(s_nav_settings_label, screen == DISPLAY_UI_SCREEN_SETTINGS ? COLOR_ACCENT : COLOR_MUTED,
-                                 0);
 }
 
+// One button, context-dependent: "Settings" while on the watchlist, "Exit"
+// while on Settings - not two persistent tabs.
 static void nav_click_cb(lv_event_t *e)
 {
-    set_active_screen((display_ui_screen_t)(intptr_t)lv_event_get_user_data(e));
+    (void)e;
+    set_active_screen(s_active_screen == DISPLAY_UI_SCREEN_WATCHLIST ? DISPLAY_UI_SCREEN_SETTINGS
+                                                                      : DISPLAY_UI_SCREEN_WATCHLIST);
 }
 
 static void update_statusbar(void)
@@ -402,19 +402,21 @@ static void build_statusbar(lv_obj_t *screen)
     lv_obj_set_style_text_font(s_conn_label, &lv_font_montserrat_12, 0);
     lv_label_set_text(s_conn_label, LV_SYMBOL_WIFI " --");
 
-    lv_obj_t *watchlist_btn = lv_button_create(right);
-    lv_obj_remove_style_all(watchlist_btn);
-    lv_obj_add_event_cb(watchlist_btn, nav_click_cb, LV_EVENT_CLICKED, (void *)(intptr_t)DISPLAY_UI_SCREEN_WATCHLIST);
-    s_nav_watchlist_label = lv_label_create(watchlist_btn);
-    lv_obj_set_style_text_font(s_nav_watchlist_label, &lv_font_montserrat_12, 0);
-    lv_label_set_text(s_nav_watchlist_label, LV_SYMBOL_LIST " Watchlist");
-
-    lv_obj_t *settings_btn = lv_button_create(right);
-    lv_obj_remove_style_all(settings_btn);
-    lv_obj_add_event_cb(settings_btn, nav_click_cb, LV_EVENT_CLICKED, (void *)(intptr_t)DISPLAY_UI_SCREEN_SETTINGS);
-    s_nav_settings_label = lv_label_create(settings_btn);
-    lv_obj_set_style_text_font(s_nav_settings_label, &lv_font_montserrat_12, 0);
-    lv_label_set_text(s_nav_settings_label, LV_SYMBOL_SETTINGS " Settings");
+    lv_obj_t *nav_btn = lv_button_create(right);
+    lv_obj_remove_style_all(nav_btn);
+    // A label-sized hit target is as hard to tap as a hyperlink - pad the
+    // button well past its text, then extend the touch-sensitive area
+    // further still, without changing how big it looks.
+    lv_obj_set_style_pad_top(nav_btn, 10, 0);
+    lv_obj_set_style_pad_bottom(nav_btn, 10, 0);
+    lv_obj_set_style_pad_left(nav_btn, 10, 0);
+    lv_obj_set_style_pad_right(nav_btn, 10, 0);
+    lv_obj_set_ext_click_area(nav_btn, 16);
+    lv_obj_add_event_cb(nav_btn, nav_click_cb, LV_EVENT_CLICKED, NULL);
+    s_nav_label = lv_label_create(nav_btn);
+    lv_obj_set_style_text_color(s_nav_label, COLOR_ACCENT, 0);
+    lv_obj_set_style_text_font(s_nav_label, &lv_font_montserrat_12, 0);
+    lv_label_set_text(s_nav_label, LV_SYMBOL_SETTINGS " Settings");
 }
 
 static void build_settings_placeholder(lv_obj_t *screen)
