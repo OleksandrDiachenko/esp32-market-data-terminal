@@ -15,4 +15,5 @@ idf_component_register(
         app_state
         nvs_flash
         console
+        app_update
 )

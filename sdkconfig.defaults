@@ -8,6 +8,13 @@ CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
 CONFIG_NVS_ENCRYPTION=y
 CONFIG_NVS_SEC_HMAC_EFUSE_KEY_ID=5
 
+# Anti-rollback boot-loop protection for Phase 10's OTA updates: a newly
+# flashed ota_0/ota_1 image boots in ESP_OTA_IMG_PENDING_VERIFY state and
+# is only kept on the next boot after app_main() confirms it via
+# esp_ota_mark_app_valid_cancel_rollback() - see
+# docs/decisions/0006-ota-firmware-update.md.
+CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
+
 # JC4880P443C_I_W boards currently use early ESP32-P4 silicon.
 CONFIG_ESP32P4_SELECTS_REV_LESS_V3=y
 CONFIG_ESP32P4_REV_MIN_100=y
