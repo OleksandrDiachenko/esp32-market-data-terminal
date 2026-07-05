@@ -543,6 +543,49 @@ static void make_plain_container(lv_obj_t *obj)
                                 LV_OBJ_FLAG_GESTURE_BUBBLE);
 }
 
+// lv_switch/lv_textarea/lv_keyboard all render with LVGL's built-in default
+// theme unless restyled - light/blue chrome that clashes badly with this
+// screen's near-black background. These three helpers are this file's only
+// native (non-fully-custom) widgets, so their dark-theme styling lives here
+// rather than repeated per call site.
+static void style_dark_switch(lv_obj_t *sw)
+{
+    lv_obj_set_style_bg_color(sw, lv_color_hex(0x2A2F38), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(sw, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_border_width(sw, 0, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(sw, COLOR_UP, LV_PART_MAIN | LV_STATE_CHECKED);
+    lv_obj_set_style_bg_color(sw, COLOR_INK, LV_PART_KNOB);
+    lv_obj_set_style_bg_opa(sw, LV_OPA_COVER, LV_PART_KNOB);
+    lv_obj_set_style_border_width(sw, 0, LV_PART_KNOB);
+}
+
+static void style_dark_textarea(lv_obj_t *ta)
+{
+    lv_obj_set_style_bg_color(ta, lv_color_hex(0x171B21), 0);
+    lv_obj_set_style_bg_opa(ta, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_color(ta, lv_color_hex(0x2C3440), 0);
+    lv_obj_set_style_border_width(ta, 1, 0);
+    lv_obj_set_style_radius(ta, 10, 0);
+    lv_obj_set_style_text_color(ta, COLOR_TEXT, 0);
+    lv_obj_set_style_text_font(ta, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_color(ta, COLOR_MUTED, LV_PART_TEXTAREA_PLACEHOLDER);
+    lv_obj_set_style_border_color(ta, COLOR_ACCENT, LV_PART_CURSOR);
+}
+
+static void style_dark_keyboard(lv_obj_t *kb)
+{
+    lv_obj_set_style_bg_color(kb, COLOR_STATUSBAR_BG, LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(kb, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_border_width(kb, 0, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(kb, lv_color_hex(0x1B1F26), LV_PART_ITEMS);
+    lv_obj_set_style_bg_opa(kb, LV_OPA_COVER, LV_PART_ITEMS);
+    lv_obj_set_style_border_color(kb, COLOR_HAIRLINE, LV_PART_ITEMS);
+    lv_obj_set_style_border_width(kb, 1, LV_PART_ITEMS);
+    lv_obj_set_style_text_color(kb, COLOR_TEXT, LV_PART_ITEMS);
+    lv_obj_set_style_bg_color(kb, COLOR_ACCENT, LV_PART_ITEMS | LV_STATE_CHECKED);
+    lv_obj_set_style_text_color(kb, lv_color_hex(0x04141C), LV_PART_ITEMS | LV_STATE_CHECKED);
+}
+
 // A tappable row: title on the left, a chevron on the right. Caller attaches
 // its own click handler; more Settings rows (Wi-Fi, watchlist, updates) land
 // in later slices.
@@ -827,6 +870,7 @@ static void build_wifi_password_screen(lv_obj_t *screen)
     lv_obj_set_style_pad_left(s_wifi_password_title, 20, 0);
 
     s_wifi_password_input = lv_textarea_create(s_wifi_password_screen);
+    style_dark_textarea(s_wifi_password_input);
     lv_textarea_set_one_line(s_wifi_password_input, true);
     lv_textarea_set_password_mode(s_wifi_password_input, true);
     lv_textarea_set_max_length(s_wifi_password_input, WIFI_MANAGER_PASSWORD_MAX);
@@ -857,6 +901,7 @@ static void build_wifi_password_screen(lv_obj_t *screen)
     lv_label_set_text(connect_label, "Connect");
 
     s_wifi_password_keyboard = lv_keyboard_create(s_wifi_password_screen);
+    style_dark_keyboard(s_wifi_password_keyboard);
     lv_keyboard_set_mode(s_wifi_password_keyboard, LV_KEYBOARD_MODE_TEXT_LOWER);
     lv_obj_add_flag(s_wifi_password_keyboard, LV_OBJ_FLAG_HIDDEN);
 }
@@ -914,6 +959,7 @@ static void build_locale_screen(lv_obj_t *screen)
     lv_label_set_text(toggle_label, "24-hour clock");
 
     lv_obj_t *toggle = lv_switch_create(toggle_row);
+    style_dark_switch(toggle);
     if (s_locale.time_24h)
     {
         lv_obj_add_state(toggle, LV_STATE_CHECKED);
