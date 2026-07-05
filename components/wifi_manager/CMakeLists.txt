@@ -1,6 +1,7 @@
 idf_component_register(
     SRCS
         "src/wifi_manager.c"
+        "src/wifi_manager_slave_ota.c"
         "src/wifi_policy.c"
         "src/wifi_profile_codec.c"
         "src/wifi_profile_store.c"
@@ -11,6 +12,8 @@ idf_component_register(
     REQUIRES
         esp_wifi
     PRIV_REQUIRES
+        bootloader_support
+        esp_app_format
         esp_event
         esp_netif
         esp_partition

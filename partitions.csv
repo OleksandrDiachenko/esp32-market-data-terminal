@@ -5,3 +5,4 @@ phy_init,   data, phy,      0xF000,   4K,
 factory,    app,  factory,  0x20000,  4M,
 nvs_keys,   data, nvs_keys, 0xD20000, 4K,   encrypted
 wifi_cfg,   data, nvs,      0xD21000, 64K,
+slave_fw,   data, 0x40,     0xD40000, 2M,

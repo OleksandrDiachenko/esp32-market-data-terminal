@@ -13,6 +13,7 @@
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "sdkconfig.h"
+#include "wifi_manager_slave_ota.h"
 #include "wifi_policy.h"
 #include "wifi_profile_store.h"
 
@@ -1041,6 +1042,7 @@ esp_err_t wifi_manager_start(void)
     ESP_LOGI(TAG, "Wi-Fi station started over ESP-Hosted link");
 
     log_coprocessor_version();
+    wifi_manager_slave_ota_check_and_update();
 
     wifi_mgr_cmd_t cmd = {.kind = CMD_STARTED};
     if (enqueue_cmd(&cmd) != ESP_OK)
