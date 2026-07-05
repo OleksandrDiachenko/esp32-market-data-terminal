@@ -1,0 +1,16 @@
+idf_component_register(
+    SRCS
+        "src/ota_client.c"
+        "src/ota_client_json.c"
+    INCLUDE_DIRS
+        "include"
+    PRIV_INCLUDE_DIRS
+        "src"
+    PRIV_REQUIRES
+        esp_http_client
+        esp_https_ota
+        esp_app_format
+        esp-tls
+        bootloader_support
+        time_sync
+)

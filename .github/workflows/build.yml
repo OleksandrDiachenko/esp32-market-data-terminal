@@ -40,3 +40,6 @@ jobs:
 
       - name: Run app_state host tests
         run: make -C components/app_state/host_test test
+
+      - name: Run ota_client host tests
+        run: make -C components/ota_client/host_test test
