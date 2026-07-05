@@ -404,6 +404,14 @@ static void build_statusbar(lv_obj_t *screen)
 
     lv_obj_t *nav_btn = lv_button_create(right);
     lv_obj_remove_style_all(nav_btn);
+    // A label-sized hit target is as hard to tap as a hyperlink - pad the
+    // button well past its text, then extend the touch-sensitive area
+    // further still, without changing how big it looks.
+    lv_obj_set_style_pad_top(nav_btn, 10, 0);
+    lv_obj_set_style_pad_bottom(nav_btn, 10, 0);
+    lv_obj_set_style_pad_left(nav_btn, 10, 0);
+    lv_obj_set_style_pad_right(nav_btn, 10, 0);
+    lv_obj_set_ext_click_area(nav_btn, 16);
     lv_obj_add_event_cb(nav_btn, nav_click_cb, LV_EVENT_CLICKED, NULL);
     s_nav_label = lv_label_create(nav_btn);
     lv_obj_set_style_text_color(s_nav_label, COLOR_ACCENT, 0);
