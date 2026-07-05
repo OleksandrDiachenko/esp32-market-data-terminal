@@ -416,7 +416,7 @@ static void build_statusbar(lv_obj_t *screen)
     lv_obj_set_style_pad_column(right, 16, 0);
 
     s_conn_label = lv_label_create(right);
-    lv_obj_set_style_text_font(s_conn_label, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_font(s_conn_label, &lv_font_montserrat_14, 0);
     lv_label_set_text(s_conn_label, LV_SYMBOL_WIFI " --");
 
     lv_obj_t *nav_btn = lv_button_create(right);
@@ -451,7 +451,7 @@ static void build_statusbar(lv_obj_t *screen)
     lv_obj_add_event_cb(nav_btn, nav_click_cb, LV_EVENT_CLICKED, NULL);
     s_nav_label = lv_label_create(nav_btn);
     lv_obj_set_style_text_color(s_nav_label, COLOR_ACCENT, 0);
-    lv_obj_set_style_text_font(s_nav_label, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_font(s_nav_label, &lv_font_montserrat_14, 0);
     lv_label_set_text(s_nav_label, LV_SYMBOL_SETTINGS " Settings");
 }
 
