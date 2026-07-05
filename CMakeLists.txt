@@ -2,5 +2,10 @@
 # CMakeLists in this exact order for cmake to work correctly
 cmake_minimum_required(VERSION 3.22)
 
+# Firmware version embedded in esp_app_desc_t.version, compared against
+# GitHub release tags by Phase 10's OTA client - see
+# docs/decisions/0006-ota-firmware-update.md.
+set(PROJECT_VER_FILE ${CMAKE_CURRENT_LIST_DIR}/version.txt)
+
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 project(esp32-market-data-terminal)

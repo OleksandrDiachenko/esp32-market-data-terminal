@@ -215,11 +215,12 @@ Definition of Done, not one PR):
    criteria below
 
 Acceptance criteria:
-- [ ] ADR documenting the approach: `ota_0`/`ota_1` partition table (the
+- [x] ADR documenting the approach: `ota_0`/`ota_1` partition table (the
       existing ~9 MB gap in `partitions.csv` between `factory`'s end and
       `nvs_keys` was reserved for this), firmware versioning scheme
       (GitHub release tag == firmware version), `esp_http_client_config_t`
-      `buffer_size` sized for GitHub's long redirect `Location` header
+      `buffer_size` sized for GitHub's long redirect `Location` header -
+      see `docs/decisions/0006-ota-firmware-update.md`
 - [ ] Background periodic check of `/releases/latest` sets an
       "update available" flag in app state, surfaced once Phase 11's
       Settings screen exists
