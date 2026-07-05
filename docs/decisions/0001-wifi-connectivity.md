@@ -20,17 +20,19 @@ new investigation: it is the same approach already proven on this exact
 board model by a sibling project (`siswood-air-quality`), whose C6 has
 already been flashed with ESP-Hosted slave firmware.
 
-Pinned dependency versions (`components/wifi_manager/idf_component.yml`):
+Pinned dependency versions (`components/wifi_manager/idf_component.yml`),
+as of the 2026-07-05 addendum below:
 
 ```yaml
-espressif/esp_wifi_remote: "1.3.0"
-espressif/esp_hosted: "==2.9.3"
+espressif/esp_wifi_remote: ">=1.3.1"  # resolver picks 1.6.1 against IDF 6.0.2
+espressif/esp_hosted: "==2.12.9"
 ```
 
-These match ESP-IDF 6.0.1 and the C6 slave firmware version already on this
-board family. Upgrading either requires re-validating on real hardware
-before merging — see the `docs/validation/wifi-*.md` reports for what
-"working" looked like at this pin.
+Originally pinned to `esp_hosted==2.9.3` / `esp_wifi_remote 1.3.0` / ESP-IDF
+6.0.1, matching the C6 slave firmware version already on this board family
+at the time. See the addendum for why and how this moved to 2.12.9, and
+`docs/validation/wifi-*.md` for what "working" looked like at each pin.
+Upgrading either requires re-validating on real hardware before merging.
 
 ### SDIO configuration (`sdkconfig.defaults`)
 
@@ -87,3 +89,35 @@ larger decision.
 - **Plaintext NVS for credentials:** simpler, but stores Wi-Fi passwords in
   the clear on flash; rejected given this is a device users will actually
   configure with real home network credentials.
+
+## Addendum (2026-07-05): esp_hosted 2.9.3 → 2.12.9, resolved
+
+A first attempt at this bump (host pin only, C6 untouched) boot-looped:
+newer host code hard-checks an SDIO packet/streaming mode match against
+whatever the C6 is running, and the C6 (2.12.8, inherited from a sibling
+project, never reflashed by this project) didn't match. Reverted; full
+write-up of that attempt lives in git history
+(`chore/esp-hosted-2.12.9-upgrade` branch/PR).
+
+The real fix was [0005](0005-esp-hosted-slave-ota.md): a host-driven
+mechanism to push new co-processor firmware over the existing SDIO
+transport (no UART), so host and co-processor versions can be bumped
+together instead of drifting apart. Using it:
+
+1. Built the co-processor firmware at 2.12.9 (`tools/esp_hosted_slave/`,
+   ESP-IDF v5.5.4 - see 0005 for why), explicitly forced into **packet
+   mode** (`CONFIG_ESP_SDIO_STREAMING_MODE=n`,
+   `tools/esp_hosted_slave/sdkconfig.packet_mode`) to match this project's
+   host-side config - the slave project's own default is streaming mode,
+   which is what caused the mismatch in the first place.
+2. Pushed it via the *old* (2.9.3) host, which doesn't hard-check mode
+   compatibility - confirmed the co-processor's actual firmware changed to
+   2.12.9.
+3. Only then bumped the host pin to 2.12.9 (+ ESP-IDF 6.0.1 → 6.0.2 in every
+   `idf_component.yml`, + CI's `esp_idf_version` in
+   `.github/workflows/build.yml`) and reflashed.
+
+Result on hardware: `transport: SDIO mode: slave: packet, host: packet` -
+clean match, no abort, no `Version mismatch` warning (the one present on
+every boot log since Phase 5). Wi-Fi/WebSocket/REST all unaffected. See
+`docs/validation/esp-hosted-2.12.9-slave-packet-mode-hardware-test.md`.

@@ -1,0 +1,8 @@
+# Forces the ESP32-C6 co-processor build into SDIO packet mode, matching
+# this project's host-side config (components/wifi_manager/sdkconfig.defaults,
+# CONFIG_ESP_HOSTED_SDIO_OPTIMIZATION_RX_MAX_SIZE=y). The slave project's own
+# default (CONFIG_ESP_SDIO_STREAMING_MODE=y) does not match - see
+# docs/decisions/0005-esp-hosted-slave-ota.md and 0001's 2026-07-05 addendum
+# for why streaming mode is deliberately avoided on the host (heap
+# fragmentation under long HTTPS transfers).
+CONFIG_ESP_SDIO_STREAMING_MODE=n

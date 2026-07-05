@@ -152,3 +152,18 @@ rebooted, host resynced - `ESP32-C6 co-processor firmware: 2.9.3` on every
 boot since, version-mismatch warning gone, Wi-Fi/WebSocket/REST all
 unaffected (BTCUSDT/ETHUSDT synced, WebSocket connected, IP obtained). See
 `docs/validation/esp-hosted-slave-ota-hardware-test.md`.
+
+## Follow-up: used to actually close out the 2.12.9 bump
+
+This ADR originally proved the mechanism at a same-family bump (2.9.3 host,
+2.9.3 co-processor) rather than the version that motivated it. The
+follow-up used this mechanism for real: built the co-processor firmware at
+2.12.9 with `tools/esp_hosted_slave/sdkconfig.packet_mode` forcing packet
+mode (`CONFIG_ESP_SDIO_STREAMING_MODE=n`) to match the host - the slave
+project's own default is streaming mode, which is *why* the original
+2.12.9 attempt boot-looped. Pushed via the still-2.9.3 host (tolerant of
+the temporary mismatch), confirmed the co-processor was now on 2.12.9, then
+bumped the host pin. Result:
+`transport: SDIO mode: slave: packet, host: packet` - clean match. See
+[0001](0001-wifi-connectivity.md)'s 2026-07-05 addendum and
+`docs/validation/esp-hosted-2.12.9-slave-packet-mode-hardware-test.md`.

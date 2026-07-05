@@ -1,6 +1,6 @@
 dependencies:
   idf:
-    version: ">=6.0.1"
+    version: ">=6.0.2"
   espressif/esp_lcd_st7701:
     version: "^2.0.2"
     public: true
