@@ -4,6 +4,7 @@ idf_component_register(
         "startup_diagnostics.c"
         "app_lifecycle.c"
         "display_ui.c"
+        "ota_console.c"
     INCLUDE_DIRS
         "."
     REQUIRES
@@ -13,4 +14,5 @@ idf_component_register(
         time_sync
         app_state
         nvs_flash
+        console
 )

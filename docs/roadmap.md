@@ -221,15 +221,19 @@ Acceptance criteria:
       (GitHub release tag == firmware version), `esp_http_client_config_t`
       `buffer_size` sized for GitHub's long redirect `Location` header -
       see `docs/decisions/0006-ota-firmware-update.md`
-- [ ] Background periodic check of `/releases/latest` sets an
+- [x] Background periodic check of `/releases/latest` sets an
       "update available" flag in app state, surfaced once Phase 11's
-      Settings screen exists
-- [ ] Manual "check now" / "update now" trigger (CLI/log-driven until
-      Phase 11's UI exists, then wired into Settings)
+      Settings screen exists - `app_state_ota_task` (every 6h, soft
+      dependency like the REST sync task), flag in
+      `app_state_get_ota_info()`/`_set_ota_info()`
+- [x] Manual "check now" / "update now" trigger (CLI/log-driven until
+      Phase 11's UI exists, then wired into Settings) - `ota_check`/
+      `ota_update` console commands (`main/ota_console.c`) over the
+      existing log UART
 - [ ] Rollback on a bad image validated
       (`esp_ota_mark_app_valid_cancel_rollback` / anti-rollback boot-loop
       protection)
-- [ ] No new secrets required (public repo, public release assets)
+- [x] No new secrets required (public repo, public release assets)
 - [ ] Validated on real hardware: a real OTA flash from a GitHub release,
       plus a deliberate bad-image rollback test
 

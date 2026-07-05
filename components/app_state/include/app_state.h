@@ -74,6 +74,24 @@ esp_err_t app_state_record_success(uint8_t index, const market_data_kline_t *kli
 // unchanged is pointless).
 esp_err_t app_state_record_error(uint8_t index, market_data_err_t err, bool recoverable);
 
+// --- OTA update-available flag (written by app_state_ota_task) ---
+
+#define APP_STATE_OTA_VERSION_MAX_LEN 32
+
+typedef struct
+{
+    bool update_available;
+    char latest_version[APP_STATE_OTA_VERSION_MAX_LEN]; // valid when update_available
+} app_state_ota_info_t;
+
+// Thread-safe copy of the last background OTA check's result. All-zero
+// (update_available=false, empty latest_version) until the first check
+// completes - not itself an error.
+esp_err_t app_state_get_ota_info(app_state_ota_info_t *out_info);
+
+// Writer API (app_state_ota_task only).
+esp_err_t app_state_set_ota_info(bool update_available, const char *latest_version);
+
 // Applies one live `@kline_1s` update from app_state_ws_task into index's
 // klines (see app_state_kline_merge.h for the merge/append/stale-ignore
 // rules), under the same lock as app_state_record_success()/_error(). Does

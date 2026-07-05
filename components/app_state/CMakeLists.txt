@@ -2,6 +2,7 @@ idf_component_register(
     SRCS
         "src/app_state.c"
         "src/app_state_kline_merge.c"
+        "src/app_state_ota_task.c"
         "src/app_state_retry_policy.c"
         "src/app_state_sync_task.c"
         "src/app_state_ws_task.c"
@@ -18,4 +19,5 @@ idf_component_register(
         esp_timer
         time_sync
         wifi_manager
+        ota_client
 )
