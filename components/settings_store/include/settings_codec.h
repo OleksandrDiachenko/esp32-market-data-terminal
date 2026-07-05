@@ -20,9 +20,9 @@ extern "C" {
 #define SETTINGS_DISPLAY_VERSION 1u
 
 #define SETTINGS_SYMBOLS_MAGIC 0x53534d42u // 'SSMB'
-#define SETTINGS_SYMBOLS_VERSION 1u
+#define SETTINGS_SYMBOLS_VERSION 2u // bumped alongside SETTINGS_MAX_WATCHLIST - layout size changed
 #define SETTINGS_SYMBOL_MAX_LEN 15
-#define SETTINGS_MAX_WATCHLIST 8
+#define SETTINGS_MAX_WATCHLIST 10 // bumped from 8 - see docs/decisions/0007-watchlist-management.md
 
 #define SETTINGS_LOCALE_MAGIC 0x534c4f43u // 'SLOC'
 #define SETTINGS_LOCALE_VERSION 1u

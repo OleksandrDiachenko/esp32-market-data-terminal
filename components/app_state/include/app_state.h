@@ -62,6 +62,26 @@ esp_err_t app_state_get_symbol_meta(uint8_t index, app_state_symbol_meta_t *out_
 esp_err_t app_state_get_symbol_klines(uint8_t index, market_data_kline_t *out_klines, uint16_t out_capacity,
                                        uint16_t *out_count);
 
+// --- watchlist editing (display_ui's Settings screens) ---
+//
+// Runtime-only: the caller is responsible for also persisting the change via
+// settings_store_save_symbols() - app_state doesn't call back into
+// settings_store itself. New symbols start at APP_STATE_SYMBOL_INIT and get
+// real data on app_state_sync_task's next sweep; see
+// docs/decisions/0007-watchlist-management.md for why the live WebSocket
+// stream doesn't pick them up until the next reboot.
+
+// Appends ticker as a new watchlist slot (allocating its PSRAM klines
+// buffer). Fails with ESP_ERR_NO_MEM if the watchlist is already at
+// APP_STATE_MAX_SYMBOLS - callers should disable their own "add" entry
+// point at the limit rather than rely on this as the only guard.
+esp_err_t app_state_add_symbol(const char *ticker);
+
+// Removes watchlist index (0..app_state_symbol_count()-1), freeing its
+// PSRAM klines buffer and shifting later entries down - the table has no
+// gaps.
+esp_err_t app_state_remove_symbol(uint8_t index);
+
 // --- writer API (app_state_sync_task only) ---
 
 // Records a successful fetch: replaces index's klines, sets state SYNCED,

@@ -279,10 +279,11 @@ Acceptance criteria:
 - [ ] Watchlist: 10 rows at ~76px + a ~40px bottom bar (480x800), each row
       a distinct LVGL object updated in place (price/change/sparkline from
       `app_state`) - no full-list redraw per tick
-- [ ] `SETTINGS_MAX_WATCHLIST` raised from 8 to 10 in `settings_store`/
+- [x] `SETTINGS_MAX_WATCHLIST` raised from 8 to 10 in `settings_store`/
       `app_state` - touches the PSRAM klines buffers sized in Phase 8
       (+25% memory for the watchlist); document this change in an ADR
-      alongside this phase
+      alongside this phase - see
+      [0007](decisions/0007-watchlist-management.md)
 - [ ] Bottom bar: navigation between Watchlist and Settings (date/time on
       the left, a Settings button on the right, matching the reference
       device)

@@ -107,6 +107,74 @@ esp_err_t app_state_get_symbol_klines(uint8_t index, market_data_kline_t *out_kl
     return ESP_OK;
 }
 
+esp_err_t app_state_add_symbol(const char *ticker)
+{
+    if (ticker == NULL)
+    {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (s_symbol_count >= APP_STATE_MAX_SYMBOLS)
+    {
+        return ESP_ERR_NO_MEM;
+    }
+
+    // Allocate before taking the lock - PSRAM allocation shouldn't happen
+    // while other tasks are blocked waiting on it for unrelated accessors.
+    market_data_kline_t *klines = heap_caps_malloc(sizeof(market_data_kline_t) * APP_STATE_KLINE_CAPACITY, MALLOC_CAP_SPIRAM);
+    if (klines == NULL)
+    {
+        ESP_LOGE(TAG, "PSRAM allocation failed for '%s' (%u bytes)", ticker,
+                 (unsigned)(sizeof(market_data_kline_t) * APP_STATE_KLINE_CAPACITY));
+        return ESP_ERR_NO_MEM;
+    }
+
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    if (s_symbol_count >= APP_STATE_MAX_SYMBOLS) // re-check under the lock against a concurrent add
+    {
+        xSemaphoreGive(s_lock);
+        heap_caps_free(klines);
+        return ESP_ERR_NO_MEM;
+    }
+    symbol_slot_t *slot = &s_symbols[s_symbol_count];
+    memset(slot, 0, sizeof(*slot));
+    strncpy(slot->symbol, ticker, SETTINGS_SYMBOL_MAX_LEN);
+    slot->state = APP_STATE_SYMBOL_INIT;
+    slot->klines = klines;
+    s_symbol_count++;
+    xSemaphoreGive(s_lock);
+
+    ESP_LOGI(TAG, "Added watchlist symbol '%s' (%u total)", slot->symbol, (unsigned)s_symbol_count);
+    return ESP_OK;
+}
+
+esp_err_t app_state_remove_symbol(uint8_t index)
+{
+    if (index >= s_symbol_count)
+    {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    if (index >= s_symbol_count) // re-check under the lock against a concurrent remove
+    {
+        xSemaphoreGive(s_lock);
+        return ESP_ERR_INVALID_ARG;
+    }
+    market_data_kline_t *klines_to_free = s_symbols[index].klines;
+    char removed_symbol[SETTINGS_SYMBOL_MAX_LEN + 1];
+    strncpy(removed_symbol, s_symbols[index].symbol, sizeof(removed_symbol));
+    for (uint8_t i = index; i < s_symbol_count - 1; i++)
+    {
+        s_symbols[i] = s_symbols[i + 1];
+    }
+    s_symbol_count--;
+    xSemaphoreGive(s_lock);
+
+    heap_caps_free(klines_to_free); // freeing PSRAM doesn't need the lock held
+    ESP_LOGI(TAG, "Removed watchlist symbol '%s' (%u remaining)", removed_symbol, (unsigned)s_symbol_count);
+    return ESP_OK;
+}
+
 esp_err_t app_state_record_success(uint8_t index, const market_data_kline_t *klines, uint16_t count, int64_t now_ms)
 {
     if (klines == NULL || index >= s_symbol_count || count > APP_STATE_KLINE_CAPACITY)
