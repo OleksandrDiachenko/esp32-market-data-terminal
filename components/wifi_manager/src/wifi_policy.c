@@ -538,6 +538,11 @@ uint8_t wifi_policy_sort_scan(wifi_policy_scan_ap_t *aps, uint8_t count, uint8_t
         {
             if (strcmp(aps[j].ssid, aps[i].ssid) == 0)
             {
+                // Only rssi is refreshed from the stronger duplicate BSSID -
+                // secured (and any other non-rssi field) keeps whatever the
+                // first-seen BSSID had. Edge case (same SSID broadcast with
+                // different security by multiple BSSIDs), not worth the
+                // extra bookkeeping here.
                 if (aps[i].rssi > aps[j].rssi)
                 {
                     aps[j].rssi = aps[i].rssi;

@@ -44,6 +44,25 @@ sub-panel in `main/display_ui.c` (Watchlist, Settings, Wi-Fi, etc.) is a child o
 screen, shown/hidden via a flag, so this works on any screen without special-casing - just
 navigate the physical device to the screen you want captured first.
 
+### Navigating without a physical tap
+
+Add `--nav TARGET` to jump to a screen before capturing, instead of asking someone to tap the
+device by hand:
+
+```sh
+python3 tools/dev_screenshot.py --port /dev/cu.usbmodem101 --nav wifi --out wifi_list.png
+python3 tools/dev_screenshot.py --port /dev/cu.usbmodem101 --nav wifi_password --ssid "MyHomeNet" --out wifi_pw.png
+```
+
+`--nav` accepts `watchlist`, `settings`, `wifi`, or `wifi_password` (pair with `--ssid` to set
+the title shown on the password screen - purely cosmetic, it doesn't need to match a real
+nearby network). This sends the `nav` console command registered by
+`display_ui_register_dev_nav_console()` in `main/display_ui.c`, which reuses the same
+`set_active_screen()`/`show_settings_view()` functions the real touch handlers call, gated by
+the same `CONFIG_DEV_SCREENSHOT_CONSOLE` flag as `screenshot` - no separate build flag to
+enable. `nav` only drives screen navigation, not touch simulation, so anything that needs an
+actual tap (typing on the keyboard, toggling a switch) still needs the physical device.
+
 ## Known side effect
 
 Enabling this flag doesn't just add `screenshot` - the console REPL itself

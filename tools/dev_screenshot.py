@@ -6,6 +6,11 @@ main/dev_screenshot_console.c, only present in dev builds with
 CONFIG_DEV_SCREENSHOT_CONSOLE enabled) and decodes the framed base64 reply
 into a PNG file.
 
+Pass --nav to first send the "nav" console command (registered by
+display_ui_register_dev_nav_console() in main/display_ui.c, same build gate)
+so the device jumps to a specific screen before capturing - no physical tap
+needed. Valid targets: watchlist, settings, wifi, wifi_password [ssid].
+
 Wire format (see dev_screenshot_console.c for the firmware side):
 
     SCREENSHOT_BEGIN width=480 height=800 stride=960 format=RGB565 bytes=768000
@@ -54,10 +59,33 @@ def rgb565_to_rgb888(raw, width, height, stride):
     return pixels
 
 
-def capture(port, baud, timeout, out_path):
+def navigate(ser, timeout, nav, nav_ssid):
+    command = f"nav {nav}" + (f" {nav_ssid}" if nav_ssid else "") + "\n"
+    ser.write(command.encode("ascii"))
+    ser.flush()
+
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        raw_line = ser.readline()
+        if not raw_line:
+            continue
+        line = raw_line.decode("ascii", errors="replace").strip()
+        if line.startswith("NAV_ERROR"):
+            fields = parse_kv_line(line, "NAV_ERROR")
+            raise RuntimeError(f"device reported nav error: {fields.get('reason', 'unknown')}")
+        if line.startswith("NAV_OK"):
+            return
+    raise TimeoutError("never saw NAV_OK - is CONFIG_DEV_SCREENSHOT_CONSOLE enabled on this build?")
+
+
+def capture(port, baud, timeout, out_path, nav=None, nav_ssid=None):
     ser = serial.Serial(port, baud, timeout=timeout)
     time.sleep(0.3)
     ser.reset_input_buffer()
+
+    if nav:
+        navigate(ser, timeout, nav, nav_ssid)
+        time.sleep(0.3)  # let the LVGL flag flips / re-render settle before capturing
 
     ser.write(b"screenshot\n")
     ser.flush()
@@ -120,9 +148,14 @@ def main():
     parser.add_argument("--out", required=True, help="Output PNG path")
     parser.add_argument("--baud", type=int, default=115200)
     parser.add_argument("--timeout", type=float, default=15.0, help="Read timeout in seconds")
+    parser.add_argument(
+        "--nav", choices=["watchlist", "settings", "wifi", "wifi_password"],
+        help="Navigate to this screen (via the device's dev-only 'nav' console command) before capturing",
+    )
+    parser.add_argument("--ssid", help="SSID title to show on the password screen (only used with --nav wifi_password)")
     args = parser.parse_args()
 
-    out_path = capture(args.port, args.baud, args.timeout, args.out)
+    out_path = capture(args.port, args.baud, args.timeout, args.out, nav=args.nav, nav_ssid=args.ssid)
     print(out_path)
 
 

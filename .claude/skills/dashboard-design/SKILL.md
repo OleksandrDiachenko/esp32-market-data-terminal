@@ -84,15 +84,37 @@ From the `#define`s near the top of `display_ui.c` - check these still match bef
   `LV_CHART_TYPE_LINE`) via an `LV_EVENT_DRAW_TASK_ADDED` hook, adapted from the vendored
   `managed_components/lvgl__lvgl/demos/widgets/lv_demo_widgets_analytics.c`. See
   `chart_draw_event_cb()`.
+- Wi-Fi row signal-strength bars (`build_signal_icon()`) and lock icon (`build_lock_icon()`) are
+  plain nested `lv_obj`/`lv_arc` composition, not a font glyph - no lock symbol exists in the
+  vendored symbol font. `wifi_manager_ap_t.secured` (from the scan record's ESP-IDF `authmode`)
+  drives whether the lock renders at all.
+- Wi-Fi password keyboard uses a custom button map (`s_wifi_kb_map_lc`/`_uc` +
+  `s_wifi_kb_ctrl_map`) via `lv_keyboard_set_map()` instead of LVGL's stock layout, to drop the
+  cursor left/right keys and add an accent "Connect" key in their place (a literal "Connect" label
+  bypasses the stock `lv_keyboard_def_event_cb`'s string-match dispatch, so
+  `wifi_keyboard_event_cb()` replaces it, delegating everything except "Connect" back to the
+  original handler). Ghost (shift/backspace/1#/space) vs. action ("Connect") key coloring uses the
+  same `LV_EVENT_DRAW_TASK_ADDED` technique as the sparkline fill, keyed by
+  `LV_BUTTONMATRIX_CTRL_CUSTOM_1`/`_2` instead of chart series data - see
+  `wifi_keyboard_draw_event_cb()`.
+  - **Gotcha that cost real debugging time**: `LV_EVENT_DRAW_TASK_ADDED` is gated behind
+    `LV_OBJ_FLAG_SEND_DRAW_TASK_EVENTS` (checked in `lv_draw_finalize_task_creation()`,
+    `lv_draw.c`) - without that flag on the target object, the event never fires at all, silently,
+    no matter how correct the handler is. `wifi_keyboard_draw_event_cb()`'s registration sets it
+    explicitly. **`chart_draw_event_cb()` does not** - grep confirms the flag is set nowhere for
+    `row->chart`, which means the sparkline gradient fill may never actually be rendering and the
+    Watchlist charts could be plain lines today. Worth an on-device screenshot check before
+    trusting that feature is live.
 
 ## Known, deliberate gaps (not bugs)
 
-- Wi-Fi rows show no signal-strength bars or lock icons (no security-type data available from
-  `wifi_manager`, and signal strength - `rssi` - is fetched but not yet rendered).
 - Wi-Fi on/off toggle and "Add hidden network" from the original mockup are not implemented (no
   backing API / still an open design question).
-- The stock `lv_keyboard` renders all keys uniformly; the mockup's ghost-key (123/backspace) vs.
-  action-key (accent "Connect") visual distinction isn't replicated - would need per-button
-  buttonmatrix control-map styling, a larger separate change.
+- Wi-Fi row signal bars only reflect `rssi`; there's no live-updating signal animation, and the
+  4-tier dBm thresholds in `wifi_rssi_to_bars()` are a reasonable approximation, not calibrated
+  against real-world measurements.
 - App-language switching (English/Ukrainian) was explicitly deferred - `locale_settings_t` has no
   UI-language field yet, only `time_24h`/`posix_tz`.
+- The Wi-Fi password keyboard's "1#" key still switches to LVGL's stock `MODE_SPECIAL` layout
+  (symbols, with cursor arrows) - only the TEXT_LOWER/TEXT_UPPER maps were customized, since the
+  mockup never showed a symbols-entry state.

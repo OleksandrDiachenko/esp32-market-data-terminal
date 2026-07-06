@@ -108,6 +108,8 @@ typedef struct
     int8_t rssi;
     bool saved;
     bool connected;
+    bool secured; // true unless the AP's authmode is open - kept a plain bool
+                  // (not wifi_auth_mode_t) to keep this header ESP-IDF-free
 } wifi_policy_scan_ap_t;
 
 typedef struct

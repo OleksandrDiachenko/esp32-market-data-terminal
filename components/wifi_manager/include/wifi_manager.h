@@ -62,6 +62,7 @@ typedef struct
     int8_t rssi;
     bool saved;
     bool connected;
+    bool secured; // false for open networks
 } wifi_manager_ap_t;
 
 typedef struct

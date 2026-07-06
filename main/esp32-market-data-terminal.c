@@ -140,4 +140,12 @@ void app_main(void)
     {
         ESP_LOGW(TAG, "Dev screenshot console command failed to register");
     }
+
+    // Dev-only "nav" console command - same gate as the screenshot command
+    // above, lets tools/dev_screenshot.py --nav jump to a screen before
+    // capturing it.
+    if (display_ui_register_dev_nav_console() != ESP_OK)
+    {
+        ESP_LOGW(TAG, "Dev nav console command failed to register");
+    }
 }

@@ -593,6 +593,7 @@ static void handle_scan_done(void)
         strncpy(scan_policy_aps[i].ssid, (const char *)scan_records[i].ssid, WIFI_POLICY_SSID_MAX);
         scan_policy_aps[i].ssid[WIFI_POLICY_SSID_MAX] = '\0';
         scan_policy_aps[i].rssi = scan_records[i].rssi;
+        scan_policy_aps[i].secured = (scan_records[i].authmode != WIFI_AUTH_OPEN);
     }
 
     wifi_policy_profile_t profiles[WIFI_PROFILE_MAX_PROFILES];
@@ -616,6 +617,7 @@ static void handle_scan_done(void)
             snapshot.aps[i].rssi = scan_policy_aps[i].rssi;
             snapshot.aps[i].saved = scan_policy_aps[i].saved;
             snapshot.aps[i].connected = scan_policy_aps[i].connected;
+            snapshot.aps[i].secured = scan_policy_aps[i].secured;
         }
         xSemaphoreGive(snapshot_mutex);
     }
