@@ -425,6 +425,18 @@ static wifi_manager_state_t map_policy_state(wifi_policy_state_t state)
 
 static void publish_event(wifi_manager_event_id_t id, const char *ssid)
 {
+    if (snapshot_mutex != NULL && xSemaphoreTake(snapshot_mutex, portMAX_DELAY) == pdTRUE)
+    {
+        snapshot.last_event = id;
+        snapshot.last_event_ssid[0] = '\0';
+        if (ssid != NULL)
+        {
+            strncpy(snapshot.last_event_ssid, ssid, WIFI_MANAGER_SSID_MAX);
+        }
+        snapshot.last_event_seq++;
+        xSemaphoreGive(snapshot_mutex);
+    }
+
     if (event_queue == NULL)
     {
         return;

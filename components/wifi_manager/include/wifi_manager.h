@@ -75,6 +75,19 @@ typedef struct
     wifi_manager_known_t known[WIFI_MANAGER_MAX_PROFILES];
     uint8_t ap_count;
     wifi_manager_ap_t aps[WIFI_MANAGER_MAX_SCAN_APS];
+    // Mirrors the most recent item pushed onto the event queue (see
+    // wifi_manager_get_event_queue()) so callers that only need "what just
+    // happened" (e.g. the password-entry screen watching for its own
+    // connect attempt to resolve) don't have to consume that queue - it has
+    // exactly one real consumer (app_state_sync_task) and reading it twice
+    // would steal events from that task. last_event_seq increments on every
+    // event; compare against a baseline captured before the action that
+    // should produce it, since last_event alone can't distinguish "hasn't
+    // happened yet" from "happened once already, before you started
+    // watching" (event ids repeat).
+    wifi_manager_event_id_t last_event;
+    char last_event_ssid[WIFI_MANAGER_SSID_MAX + 1];
+    uint32_t last_event_seq;
 } wifi_manager_snapshot_t;
 
 /**

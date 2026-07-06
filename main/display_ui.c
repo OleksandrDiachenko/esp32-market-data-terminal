@@ -30,6 +30,7 @@ static const char *TAG = "display_ui";
 #define SUBHEADER_HEIGHT_PX 64
 #define SETTINGS_ICON_CHIP_PX 40
 #define NAV_BUTTON_WIDTH_PX 130
+#define WIFI_PASSWORD_FIELD_HEIGHT_PX 54 // matches the eye-toggle button below it
 #define UPDATE_PERIOD_MS 1000
 
 #define COLOR_INK lv_color_hex(0x0A0C10)
@@ -100,10 +101,22 @@ static lv_obj_t *s_wifi_list;
 static wifi_manager_snapshot_t s_wifi_snapshot;
 
 static lv_obj_t *s_wifi_password_screen;
-static lv_obj_t *s_wifi_password_title;
+static lv_obj_t *s_wifi_ssid_input;
 static lv_obj_t *s_wifi_password_input;
 static lv_obj_t *s_wifi_password_keyboard;
+static lv_obj_t *s_wifi_password_status;
 static char s_wifi_pending_ssid[WIFI_MANAGER_SSID_MAX + 1];
+// true once the SSID field is showing a network picked from the scan list
+// (read-only there); false for the "Add Network" flow, where the SSID field
+// is itself editable via the shared keyboard.
+static bool s_wifi_ssid_known;
+// Set on Connect tap, cleared once wifi_password_poll() (called from the
+// main 1s update timer) sees the attempt resolve one way or another - see
+// wifi_manager_snapshot_t's last_event/last_event_seq in wifi_manager.h.
+static bool s_wifi_connecting;
+static uint32_t s_wifi_connect_baseline_seq;
+static uint8_t s_wifi_connect_ticks;
+#define WIFI_CONNECT_TIMEOUT_TICKS 20 // ~20s at the 1s update-timer cadence
 
 // Reused scratch buffers: avoids per-tick dynamic allocation (AGENTS.md: no
 // dynamic allocation in the hot path) and avoids putting
@@ -510,6 +523,7 @@ static void update_statusbar(void)
 }
 
 static void update_wifi_screen(void); // defined further down, alongside the rest of the Wi-Fi screen
+static void wifi_password_poll(void); // defined further down, alongside the rest of the password screen
 
 static void update_timer_cb(lv_timer_t *timer)
 {
@@ -535,6 +549,10 @@ static void update_timer_cb(lv_timer_t *timer)
     if (s_active_screen == DISPLAY_UI_SCREEN_SETTINGS && s_settings_view == SETTINGS_VIEW_WIFI)
     {
         update_wifi_screen();
+    }
+    else if (s_active_screen == DISPLAY_UI_SCREEN_SETTINGS && s_settings_view == SETTINGS_VIEW_WIFI_PASSWORD)
+    {
+        wifi_password_poll();
     }
 }
 
@@ -664,7 +682,14 @@ static void style_dark_textarea(lv_obj_t *ta)
     lv_obj_set_style_text_color(ta, COLOR_TEXT, 0);
     lv_obj_set_style_text_font(ta, &lv_font_montserrat_16, 0);
     lv_obj_set_style_text_color(ta, COLOR_MUTED, LV_PART_TEXTAREA_PLACEHOLDER);
-    lv_obj_set_style_border_color(ta, COLOR_ACCENT, LV_PART_CURSOR);
+    // A thin 2px I-beam, not a filled block - and gated to LV_STATE_FOCUSED
+    // specifically, otherwise it was rendering as a static, non-blinking
+    // artifact on whichever field *didn't* have focus too (the un-gated
+    // LV_PART_CURSOR selector applies regardless of focus state).
+    lv_obj_set_style_bg_opa(ta, LV_OPA_TRANSP, LV_PART_CURSOR | LV_STATE_FOCUSED);
+    lv_obj_set_style_border_side(ta, LV_BORDER_SIDE_LEFT, LV_PART_CURSOR | LV_STATE_FOCUSED);
+    lv_obj_set_style_border_width(ta, 2, LV_PART_CURSOR | LV_STATE_FOCUSED);
+    lv_obj_set_style_border_color(ta, COLOR_MUTED, LV_PART_CURSOR | LV_STATE_FOCUSED); // matches the eye icon's color
 }
 
 static void style_dark_keyboard(lv_obj_t *kb)
@@ -778,21 +803,161 @@ static void build_subscreen_header(lv_obj_t *parent, const char *title, lv_event
     lv_label_set_text(title_label, title);
 }
 
-static void wifi_password_focus_cb(lv_event_t *e)
+// Shared by both the SSID field (only when editable - the "Add Network"
+// flow) and the password field: links whichever textarea was tapped to the
+// one shared keyboard instance.
+static void wifi_field_focus_cb(lv_event_t *e)
 {
-    (void)e;
-    lv_keyboard_set_textarea(s_wifi_password_keyboard, s_wifi_password_input);
+    lv_obj_t *ta = lv_event_get_target(e);
+    lv_keyboard_set_textarea(s_wifi_password_keyboard, ta);
     lv_obj_remove_flag(s_wifi_password_keyboard, LV_OBJ_FLAG_HIDDEN);
+}
+
+// Toggles whether the SSID/password fields and keyboard accept input -
+// used to lock everything down while a connect attempt is in flight (see
+// wifi_password_connect_cb()/wifi_password_poll()) so the user can't edit
+// out from under an in-progress attempt.
+static void wifi_password_set_inputs_enabled(bool enabled)
+{
+    if (enabled)
+    {
+        lv_obj_clear_state(s_wifi_password_input, LV_STATE_DISABLED);
+    }
+    else
+    {
+        lv_obj_add_state(s_wifi_password_input, LV_STATE_DISABLED);
+    }
+
+    if (!s_wifi_ssid_known)
+    {
+        if (enabled)
+        {
+            lv_obj_clear_state(s_wifi_ssid_input, LV_STATE_DISABLED);
+        }
+        else
+        {
+            lv_obj_add_state(s_wifi_ssid_input, LV_STATE_DISABLED);
+        }
+    }
+
+    // Stays visible while connecting (per feedback: don't hide it) - just
+    // disabled, and wifi_keyboard_event_cb() ignores presses while
+    // s_wifi_connecting is set, as a second guard since LV_STATE_DISABLED
+    // alone doesn't stop lv_keyboard's direct textarea manipulation.
+    if (enabled)
+    {
+        lv_obj_clear_state(s_wifi_password_keyboard, LV_STATE_DISABLED);
+    }
+    else
+    {
+        lv_obj_add_state(s_wifi_password_keyboard, LV_STATE_DISABLED);
+    }
+}
+
+static void wifi_password_connect_failed(const char *msg)
+{
+    s_wifi_connecting = false;
+    wifi_password_set_inputs_enabled(true);
+    lv_label_set_text(s_wifi_password_status, msg);
+}
+
+// Called every ~1s from update_timer_cb() while this screen is showing and
+// a connect attempt is in flight. wifi_manager can't be polled via its
+// event queue here - that queue has exactly one real consumer
+// (app_state_sync_task, see its comment) - so this instead watches
+// wifi_manager_snapshot_t's last_event_seq, which mirrors the same events
+// for read-only observers like this one.
+static void wifi_password_poll(void)
+{
+    if (!s_wifi_connecting)
+    {
+        return;
+    }
+
+    wifi_manager_snapshot_t snap;
+    if (wifi_manager_get_snapshot(&snap) != ESP_OK)
+    {
+        return;
+    }
+
+    s_wifi_connect_ticks++;
+
+    if (snap.last_event_seq != s_wifi_connect_baseline_seq)
+    {
+        switch (snap.last_event)
+        {
+        case WIFI_MANAGER_EVENT_CONNECTED:
+            s_wifi_connecting = false;
+            wifi_password_set_inputs_enabled(true);
+            show_settings_view(SETTINGS_VIEW_WIFI); // status line there reflects "Connected"
+            return;
+        case WIFI_MANAGER_EVENT_AUTH_FAILED:
+            wifi_password_connect_failed("Incorrect password. Try again.");
+            return;
+        case WIFI_MANAGER_EVENT_CONNECT_FAILED:
+            wifi_password_connect_failed("Could not connect to this network. Try again.");
+            return;
+        case WIFI_MANAGER_EVENT_DISCONNECTED:
+        case WIFI_MANAGER_EVENT_ALL_PROFILES_BLOCKED:
+            wifi_password_connect_failed("Connection failed. Try again.");
+            return;
+        default:
+            break; // unrelated event (e.g. a background scan) - keep waiting
+        }
+    }
+
+    if (s_wifi_connect_ticks > WIFI_CONNECT_TIMEOUT_TICKS)
+    {
+        wifi_password_connect_failed("Connection timed out. Try again.");
+    }
 }
 
 // Fires from the keyboard's own accent "Connect" key (see
 // s_wifi_kb_map_lc/uc below and wifi_keyboard_event_cb()) - the mockup has
-// no separate submit button on this screen, just that one key.
+// no separate submit button on this screen, just that one key. Locks the
+// fields/keyboard and waits for wifi_password_poll() to see the attempt
+// resolve rather than navigating away immediately, so a wrong password
+// shows an error right here instead of silently failing on the Wi-Fi list.
 static void wifi_password_connect_cb(lv_event_t *e)
 {
     (void)e;
+    if (s_wifi_connecting)
+    {
+        return;
+    }
+
+    wifi_manager_snapshot_t snap;
+    s_wifi_connect_baseline_seq = (wifi_manager_get_snapshot(&snap) == ESP_OK) ? snap.last_event_seq : 0;
+    s_wifi_connect_ticks = 0;
+    s_wifi_connecting = true;
+    wifi_password_set_inputs_enabled(false);
+    lv_label_set_text(s_wifi_password_status, "Connecting...");
+
+    const char *ssid = lv_textarea_get_text(s_wifi_ssid_input);
+    strncpy(s_wifi_pending_ssid, ssid, WIFI_MANAGER_SSID_MAX);
+    s_wifi_pending_ssid[WIFI_MANAGER_SSID_MAX] = '\0';
     wifi_manager_connect_new(s_wifi_pending_ssid, lv_textarea_get_text(s_wifi_password_input));
-    show_settings_view(SETTINGS_VIEW_WIFI); // status line there reflects connecting/connected/failed
+}
+
+// Sets up the SSID field for either flow: a known network tapped from the
+// scan list (read-only, pre-filled) or the "Add Network" entry point
+// (empty, editable via the shared keyboard).
+static void wifi_password_screen_set_ssid(const char *ssid, bool known)
+{
+    s_wifi_ssid_known = known;
+    lv_textarea_set_text(s_wifi_ssid_input, ssid);
+    lv_label_set_text(s_wifi_password_status, "");
+
+    if (known)
+    {
+        lv_obj_remove_flag(s_wifi_ssid_input, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CLICK_FOCUSABLE);
+        lv_obj_set_style_text_color(s_wifi_ssid_input, COLOR_MUTED, 0);
+    }
+    else
+    {
+        lv_obj_add_flag(s_wifi_ssid_input, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CLICK_FOCUSABLE);
+        lv_obj_set_style_text_color(s_wifi_ssid_input, COLOR_TEXT, 0);
+    }
 }
 
 static void wifi_password_eye_toggle_cb(lv_event_t *e)
@@ -803,109 +968,130 @@ static void wifi_password_eye_toggle_cb(lv_event_t *e)
     lv_label_set_text(icon, now_masked ? LV_SYMBOL_EYE_CLOSE : LV_SYMBOL_EYE_OPEN);
 }
 
-// Custom button map for the Wi-Fi password keyboard, replacing LVGL's stock
-// TEXT_LOWER/TEXT_UPPER layouts to match the reviewed mockup: no cursor
-// left/right keys (this is a touchscreen, not a physical keyboard), and an
-// accent "Connect" key instead of the default checkmark/Enter key - this
-// screen has no separate submit button, so that key is the only way to
-// submit. Shift ("ABC"/"abc") and "1#" keep LVGL's exact built-in control
-// strings (see LV_KEYBOARD_CTRL_BUTTON_MODE_* in lv_keyboard.c) so their
-// built-in mode-switch dispatch in lv_keyboard_def_event_cb() still fires
-// via wifi_keyboard_event_cb()'s delegation below. Tapping "1#" still lands
-// on LVGL's stock MODE_SPECIAL layout (arrows and all) - that mode isn't in
-// the mockup, so it's intentionally not overridden here.
+// Custom keyboard maps for Wi-Fi password entry: letters and two symbol modes.
+// No cursor keys (touchscreen), single "Connect" key for submission. Mode
+// buttons ("ABC"/"abc"/"123"/"#+=") are fully owned by wifi_keyboard_event_cb()
+// below rather than LVGL's built-in string-matched dispatch, so the same
+// labels can drive full-mode switches (letters <-> symbols) as well as the
+// plain shift toggle.
+
+// Custom mode IDs beyond LVGL's built-in TEXT_LOWER/TEXT_UPPER, used with
+// lv_keyboard_set_mode() below.
+#define WIFI_KB_MODE_SYM_1 2
+#define WIFI_KB_MODE_SYM_2 3
+
+// Text mode - lowercase letters
 static const char *const s_wifi_kb_map_lc[] = {
     "q", "w", "e", "r", "t", "y", "u", "i", "o", "p", "\n",
     "a", "s", "d", "f", "g", "h", "j", "k", "l", "\n",
     "ABC", "z", "x", "c", "v", "b", "n", "m", LV_SYMBOL_BACKSPACE, "\n",
-    "1#", " ", "Connect", "",
+    "123", " ", "Connect", "",
 };
 
+// Text mode - uppercase letters
 static const char *const s_wifi_kb_map_uc[] = {
     "Q", "W", "E", "R", "T", "Y", "U", "I", "O", "P", "\n",
     "A", "S", "D", "F", "G", "H", "J", "K", "L", "\n",
     "abc", "Z", "X", "C", "V", "B", "N", "M", LV_SYMBOL_BACKSPACE, "\n",
-    "1#", " ", "Connect", "",
+    "123", " ", "Connect", "",
 };
 
-// One entry per button (order matches the maps above, "\n" row separators
-// excluded) - shared by both maps since button count/order/width is
-// identical whether letters are upper or lower case. Relative widths
-// approximate the mockup's flex ratios (e.g. shift/backspace at .ghost.wide
-// ~1.6x a letter key, Connect at .action ~2.4x, the space bar at .spacer
-// ~4x). CUSTOM_1 marks the dimmer "ghost" keys, CUSTOM_2 marks the one
-// accent "action" key - read by wifi_keyboard_draw_event_cb() below, since
-// lv_buttonmatrix has no other way to style individual button indices.
+// Symbol mode 1: digits + common password/SSID symbols. Row 2/3 symbol
+// counts (9/5) are chosen so each row's button-width unit total matches
+// (row 2: 9x1=9 units; row 3: shift(2)+5x1+backspace(2)=9 units), keeping
+// row 2 and row 3 keys visually similar width.
+static const char *const s_wifi_kb_map_sym_1[] = {
+    "1", "2", "3", "4", "5", "6", "7", "8", "9", "0", "\n",
+    "-", "_", ".", ",", ":", ";", "@", "(", ")", "\n",
+    "#+=", "'", "\"", "!", "?", "*", LV_SYMBOL_BACKSPACE, "\n",
+    "abc", " ", "Connect", "",
+};
+
+// Symbol mode 2: remaining symbols, same row shape as mode 1.
+static const char *const s_wifi_kb_map_sym_2[] = {
+    "1", "2", "3", "4", "5", "6", "7", "8", "9", "0", "\n",
+    "/", "\\", "+", "=", "<", ">", "#", "[", "]", "\n",
+    "!?*", "{", "}", "%", "&", "$", LV_SYMBOL_BACKSPACE, "\n",
+    "abc", " ", "Connect", "",
+};
+
+// Button widths: 1 = normal key, 2 = shift/mode-switch/backspace, 5 = space,
+// 3 = Connect. All buttons share one uniform color (no CUSTOM_1/2 flags).
 static const lv_buttonmatrix_ctrl_t s_wifi_kb_ctrl_map[] = {
-    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, // row 1: q..p
-    1, 1, 1, 1, 1, 1, 1, 1, 1,    // row 2: a..l
-    2 | LV_BUTTONMATRIX_CTRL_CUSTOM_1, // shift
-    1, 1, 1, 1, 1, 1, 1,               // z..m
-    2 | LV_BUTTONMATRIX_CTRL_CUSTOM_1, // backspace
-    2 | LV_BUTTONMATRIX_CTRL_CUSTOM_1, // 1#
-    5 | LV_BUTTONMATRIX_CTRL_CUSTOM_1, // space
-    3 | LV_BUTTONMATRIX_CTRL_CUSTOM_2, // Connect
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, // row 1: 10 keys
+    1, 1, 1, 1, 1, 1, 1, 1, 1,    // row 2: 9 keys
+    2, 1, 1, 1, 1, 1, 1, 1, 2,    // row 3: shift (2x), 7 keys (1x), backspace (2x)
+    2, 5, 3, 1,                  // row 4: mode-switch (2x), space (5x), Connect (3x), padding
+};
+
+// Symbol keyboards' row 2 is 9 keys (letters' is 9 too, but row 3 only has
+// 5 symbols instead of letters' 7), so they need their own ctrl map.
+static const lv_buttonmatrix_ctrl_t s_wifi_kb_ctrl_map_sym[] = {
+    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, // row 1: 10 keys
+    1, 1, 1, 1, 1, 1, 1, 1, 1,    // row 2: 9 keys
+    2, 1, 1, 1, 1, 1, 2,          // row 3: mode-switch (2x), 5 keys (1x), backspace (2x)
+    2, 5, 3, 1,                  // row 4: "abc" (2x), space (5x), Connect (3x), padding
 };
 
 // Replaces lv_keyboard_def_event_cb() as the keyboard's LV_EVENT_VALUE_CHANGED
-// handler. That default handler dispatches purely by exact string match
-// (LV_SYMBOL_OK -> submit, LV_SYMBOL_BACKSPACE -> delete char, anything else
-// -> typed into the linked textarea as literal text) - so a button labeled
-// "Connect" would otherwise get typed into the password field instead of
-// submitting. This wrapper intercepts only that one case and delegates
-// everything else (letters, shift, 1#, backspace, space) unchanged.
+// handler. Owns every mode-switch button ("ABC"/"abc"/"123"/"#+=") and
+// "Connect" directly instead of relying on LVGL's built-in string-matched
+// shift dispatch, since some of these labels now trigger a full mode change
+// (e.g. "abc" from a symbols page back to letters) rather than just a
+// lowercase/uppercase toggle. Only plain letters/space/backspace fall
+// through to the default handler.
 static void wifi_keyboard_event_cb(lv_event_t *e)
 {
+    if (s_wifi_connecting)
+    {
+        return; // kept visible per feedback, but inert while an attempt is in flight
+    }
+
     lv_obj_t *kb = lv_event_get_target(e);
     uint32_t btn_id = lv_buttonmatrix_get_selected_button(kb);
-    if (btn_id != LV_BUTTONMATRIX_BUTTON_NONE)
+    if (btn_id == LV_BUTTONMATRIX_BUTTON_NONE)
     {
-        const char *txt = lv_buttonmatrix_get_button_text(kb, btn_id);
-        if (txt != NULL && strcmp(txt, "Connect") == 0)
-        {
-            wifi_password_connect_cb(e);
-            return;
-        }
+        return;
     }
+
+    const char *txt = lv_buttonmatrix_get_button_text(kb, btn_id);
+    if (txt == NULL)
+    {
+        return;
+    }
+
+    if (strcmp(txt, "Connect") == 0)
+    {
+        wifi_password_connect_cb(e);
+        return;
+    }
+    if (strcmp(txt, "ABC") == 0)
+    {
+        lv_keyboard_set_mode(kb, LV_KEYBOARD_MODE_TEXT_UPPER);
+        return;
+    }
+    if (strcmp(txt, "abc") == 0)
+    {
+        lv_keyboard_set_mode(kb, LV_KEYBOARD_MODE_TEXT_LOWER);
+        return;
+    }
+    if (strcmp(txt, "123") == 0 || strcmp(txt, "!?*") == 0)
+    {
+        lv_keyboard_set_mode(kb, WIFI_KB_MODE_SYM_1);
+        return;
+    }
+    if (strcmp(txt, "#+=") == 0)
+    {
+        lv_keyboard_set_mode(kb, WIFI_KB_MODE_SYM_2);
+        return;
+    }
+
+    // Delegate everything else: letters, space, backspace
     lv_keyboard_def_event_cb(e);
 }
 
-// Recolors the "ghost" keys (shift/backspace/1#/space) dimmer than plain
-// letter keys, and the "Connect" key accent-colored - style_dark_keyboard()
-// above only sets one uniform look for every key, since lv_buttonmatrix's
-// style parts can't target individual button indices on their own. Same
-// LV_EVENT_DRAW_TASK_ADDED technique as chart_draw_event_cb() uses for the
-// Watchlist sparkline fill, just keyed by button ctrl flags instead of a
-// chart series.
-static void wifi_keyboard_draw_event_cb(lv_event_t *e)
-{
-    lv_obj_t *kb = lv_event_get_target(e);
-    lv_draw_task_t *draw_task = lv_event_get_param(e);
-    lv_draw_dsc_base_t *base_dsc = lv_draw_task_get_draw_dsc(draw_task);
-    if (base_dsc->part != LV_PART_ITEMS)
-    {
-        return;
-    }
-
-    bool ghost = lv_buttonmatrix_has_button_ctrl(kb, base_dsc->id1, LV_BUTTONMATRIX_CTRL_CUSTOM_1);
-    bool action = lv_buttonmatrix_has_button_ctrl(kb, base_dsc->id1, LV_BUTTONMATRIX_CTRL_CUSTOM_2);
-    if (!ghost && !action)
-    {
-        return;
-    }
-
-    lv_draw_task_type_t type = lv_draw_task_get_type(draw_task);
-    if (type == LV_DRAW_TASK_TYPE_FILL)
-    {
-        lv_draw_fill_dsc_t *fill_dsc = lv_draw_task_get_fill_dsc(draw_task);
-        fill_dsc->color = action ? COLOR_ACCENT : lv_color_hex(0x14171D); // dimmer than the uniform key bg
-    }
-    else if (type == LV_DRAW_TASK_TYPE_LABEL)
-    {
-        lv_draw_label_dsc_t *label_dsc = lv_draw_task_get_label_dsc(draw_task);
-        label_dsc->color = action ? lv_color_hex(0x04141C) : COLOR_MUTED;
-    }
-}
+// All keyboard buttons use uniform styling (no per-button coloring).
+// style_dark_keyboard() provides the single look for the entire keyboard.
 
 // ap points into the static s_wifi_snapshot (see its declaration) - stable
 // as long as this row exists, which is only ever within the same tick that
@@ -926,7 +1112,19 @@ static void wifi_ap_click_cb(lv_event_t *e)
     strncpy(s_wifi_pending_ssid, ap->ssid, WIFI_MANAGER_SSID_MAX);
     s_wifi_pending_ssid[WIFI_MANAGER_SSID_MAX] = '\0';
     lv_textarea_set_text(s_wifi_password_input, "");
-    lv_label_set_text(s_wifi_password_title, s_wifi_pending_ssid);
+    wifi_password_screen_set_ssid(s_wifi_pending_ssid, true);
+    show_settings_view(SETTINGS_VIEW_WIFI_PASSWORD);
+}
+
+// Entry point for the "Add network" row (build_wifi_add_network_row()) -
+// unlike wifi_ap_click_cb(), the SSID isn't known yet, so the field starts
+// empty and editable.
+static void wifi_add_network_click_cb(lv_event_t *e)
+{
+    (void)e;
+    s_wifi_pending_ssid[0] = '\0';
+    lv_textarea_set_text(s_wifi_password_input, "");
+    wifi_password_screen_set_ssid("", false);
     show_settings_view(SETTINGS_VIEW_WIFI_PASSWORD);
 }
 
@@ -1014,6 +1212,36 @@ static lv_obj_t *build_lock_icon(lv_obj_t *parent)
     return box;
 }
 
+// Entry point into the "Add Network" flow (empty, editable SSID field) -
+// the "Add hidden network" affordance from the original mockup, previously
+// a known gap (see the dashboard-design skill's "Known, deliberate gaps").
+static void build_wifi_add_network_row(lv_obj_t *parent)
+{
+    lv_obj_t *row = lv_obj_create(parent);
+    lv_obj_remove_style_all(row);
+    make_plain_container(row);
+    lv_obj_add_flag(row, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_size(row, LV_PCT(100), 60);
+    lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_left(row, 20, 0);
+    lv_obj_set_style_pad_column(row, 12, 0);
+    lv_obj_set_style_border_side(row, LV_BORDER_SIDE_BOTTOM, 0);
+    lv_obj_set_style_border_width(row, 1, 0);
+    lv_obj_set_style_border_color(row, COLOR_HAIRLINE, 0);
+    lv_obj_add_event_cb(row, wifi_add_network_click_cb, LV_EVENT_CLICKED, NULL);
+
+    lv_obj_t *icon = lv_label_create(row);
+    lv_obj_set_style_text_color(icon, COLOR_MUTED, 0); // matches the back-arrow color
+    lv_obj_set_style_text_font(icon, &lv_font_montserrat_18, 0);
+    lv_label_set_text(icon, LV_SYMBOL_PLUS);
+
+    lv_obj_t *label = lv_label_create(row);
+    lv_obj_set_style_text_color(label, COLOR_MUTED, 0); // matches the back-arrow color
+    lv_obj_set_style_text_font(label, &lv_font_montserrat_16, 0);
+    lv_label_set_text(label, "Add network");
+}
+
 static void build_wifi_ap_row(const wifi_manager_ap_t *ap)
 {
     lv_obj_t *row = lv_obj_create(s_wifi_list);
@@ -1095,6 +1323,7 @@ static void update_wifi_screen(void)
     }
 
     lv_obj_clean(s_wifi_list);
+    build_wifi_add_network_row(s_wifi_list);
     if (s_wifi_snapshot.ap_count == 0)
     {
         lv_obj_t *empty = lv_label_create(s_wifi_list);
@@ -1151,6 +1380,11 @@ static void build_wifi_screen(lv_obj_t *screen)
 static void wifi_password_back_cb(lv_event_t *e)
 {
     (void)e;
+    // Leaving mid-attempt shouldn't leave the fields disabled for next time -
+    // the connect call already in flight still runs to completion in
+    // wifi_manager, this just stops this screen watching for its result.
+    s_wifi_connecting = false;
+    wifi_password_set_inputs_enabled(true);
     show_settings_view(SETTINGS_VIEW_WIFI);
 }
 
@@ -1162,24 +1396,71 @@ static void build_wifi_password_screen(lv_obj_t *screen)
     lv_obj_set_size(s_wifi_password_screen, LV_PCT(100), BOARD_JC4880P443C_LCD_V_RES - STATUSBAR_HEIGHT_PX);
     lv_obj_set_flex_flow(s_wifi_password_screen, LV_FLEX_FLOW_COLUMN);
 
-    build_subscreen_header(s_wifi_password_screen, "Enter password", wifi_password_back_cb);
+    build_subscreen_header(s_wifi_password_screen, "Add Network", wifi_password_back_cb);
 
-    s_wifi_password_title = lv_label_create(s_wifi_password_screen);
-    lv_obj_set_style_text_color(s_wifi_password_title, COLOR_MUTED, 0);
-    lv_obj_set_style_text_font(s_wifi_password_title, &lv_font_montserrat_14, 0);
-    lv_obj_set_style_pad_top(s_wifi_password_title, 14, 0);
-    lv_obj_set_style_pad_left(s_wifi_password_title, 20, 0);
+    // SSID + password fields sit vertically centered in the space between
+    // the header and the keyboard: this wrapper takes all the leftover
+    // flex space (flex_grow 1) and centers its children within it.
+    lv_obj_t *fields_wrap = lv_obj_create(s_wifi_password_screen);
+    lv_obj_remove_style_all(fields_wrap);
+    make_plain_container(fields_wrap);
+    lv_obj_set_size(fields_wrap, LV_PCT(100), LV_SIZE_CONTENT);
+    lv_obj_set_flex_grow(fields_wrap, 1);
+    lv_obj_set_flex_flow(fields_wrap, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(fields_wrap, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+
+    // Field rows are wider than the original 90%-of-screen sizing (see the
+    // password field's own +20px below) so the SSID and password boxes
+    // still line up edge-to-edge.
+    const int32_t field_row_width_px = (int32_t)(BOARD_JC4880P443C_LCD_H_RES * 9 / 10) + 20;
+    // Vertically centers the one-line text within the fixed-height field
+    // (WIFI_PASSWORD_FIELD_HEIGHT_PX) instead of a fixed top-only pad.
+    const int32_t field_vpad_px = (WIFI_PASSWORD_FIELD_HEIGHT_PX - lv_font_get_line_height(&lv_font_montserrat_16)) / 2;
+
+    lv_obj_t *ssid_label = lv_label_create(fields_wrap);
+    lv_obj_set_style_text_color(ssid_label, COLOR_MUTED, 0);
+    lv_obj_set_style_text_font(ssid_label, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_letter_space(ssid_label, 1, 0);
+    lv_obj_set_style_pad_left(ssid_label, 20, 0);
+    lv_label_set_text(ssid_label, "SSID");
+
+    lv_obj_t *ssid_field_row = lv_obj_create(fields_wrap);
+    lv_obj_remove_style_all(ssid_field_row);
+    make_plain_container(ssid_field_row);
+    lv_obj_set_size(ssid_field_row, field_row_width_px, LV_SIZE_CONTENT);
+    lv_obj_set_style_margin_left(ssid_field_row, 20, 0);
+    lv_obj_set_style_margin_top(ssid_field_row, 8, 0);
+
+    s_wifi_ssid_input = lv_textarea_create(ssid_field_row);
+    style_dark_textarea(s_wifi_ssid_input);
+    lv_textarea_set_one_line(s_wifi_ssid_input, true);
+    lv_textarea_set_max_length(s_wifi_ssid_input, WIFI_MANAGER_SSID_MAX);
+    lv_obj_set_width(s_wifi_ssid_input, LV_PCT(100));
+    // Fixed height matching the eye button below, no border.
+    lv_obj_set_height(s_wifi_ssid_input, WIFI_PASSWORD_FIELD_HEIGHT_PX);
+    lv_obj_set_style_pad_top(s_wifi_ssid_input, field_vpad_px, 0);
+    lv_obj_set_style_pad_bottom(s_wifi_ssid_input, field_vpad_px, 0);
+    lv_obj_set_style_border_width(s_wifi_ssid_input, 0, 0);
+    lv_obj_add_event_cb(s_wifi_ssid_input, wifi_field_focus_cb, LV_EVENT_FOCUSED, NULL);
+
+    lv_obj_t *password_label = lv_label_create(fields_wrap);
+    lv_obj_set_style_text_color(password_label, COLOR_MUTED, 0);
+    lv_obj_set_style_text_font(password_label, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_letter_space(password_label, 1, 0);
+    lv_obj_set_style_pad_top(password_label, 40, 0); // +20px extra gap between the SSID and password groups
+    lv_obj_set_style_pad_left(password_label, 20, 0);
+    lv_label_set_text(password_label, "PASSWORD");
 
     // Textarea + eye-toggle button share a row so the icon sits inline at
     // the field's right edge, matching the mockup's .pwd-row.
-    lv_obj_t *field_row = lv_obj_create(s_wifi_password_screen);
+    lv_obj_t *field_row = lv_obj_create(fields_wrap);
     lv_obj_remove_style_all(field_row);
     make_plain_container(field_row);
-    lv_obj_set_size(field_row, LV_PCT(90), LV_SIZE_CONTENT);
+    lv_obj_set_size(field_row, field_row_width_px, LV_SIZE_CONTENT);
     lv_obj_set_flex_flow(field_row, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(field_row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_margin_left(field_row, 20, 0);
-    lv_obj_set_style_margin_top(field_row, 10, 0);
+    lv_obj_set_style_margin_top(field_row, 8, 0);
     lv_obj_set_style_pad_column(field_row, 8, 0);
 
     s_wifi_password_input = lv_textarea_create(field_row);
@@ -1187,38 +1468,63 @@ static void build_wifi_password_screen(lv_obj_t *screen)
     lv_textarea_set_one_line(s_wifi_password_input, true);
     lv_textarea_set_password_mode(s_wifi_password_input, true);
     lv_textarea_set_max_length(s_wifi_password_input, WIFI_MANAGER_PASSWORD_MAX);
-    lv_textarea_set_placeholder_text(s_wifi_password_input, "Password (leave blank if open)");
     lv_obj_set_flex_grow(s_wifi_password_input, 1);
-    lv_obj_set_height(s_wifi_password_input, LV_SIZE_CONTENT);
-    lv_obj_add_event_cb(s_wifi_password_input, wifi_password_focus_cb, LV_EVENT_FOCUSED, NULL);
+    // Same fixed height as the SSID field above, matching the eye button.
+    lv_obj_set_height(s_wifi_password_input, WIFI_PASSWORD_FIELD_HEIGHT_PX);
+    lv_obj_set_style_pad_top(s_wifi_password_input, field_vpad_px, 0);
+    lv_obj_set_style_pad_bottom(s_wifi_password_input, field_vpad_px, 0);
+    lv_obj_set_style_border_width(s_wifi_password_input, 0, 0);
+    lv_obj_add_event_cb(s_wifi_password_input, wifi_field_focus_cb, LV_EVENT_FOCUSED, NULL);
     lv_obj_add_event_cb(s_wifi_password_input, wifi_password_connect_cb, LV_EVENT_READY, NULL);
 
     lv_obj_t *eye_btn = lv_button_create(field_row);
     lv_obj_remove_style_all(eye_btn);
     make_plain_container(eye_btn);
     lv_obj_add_flag(eye_btn, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_set_size(eye_btn, 36, 36);
+    lv_obj_set_size(eye_btn, WIFI_PASSWORD_FIELD_HEIGHT_PX, WIFI_PASSWORD_FIELD_HEIGHT_PX);
     lv_obj_set_ext_click_area(eye_btn, 6);
     lv_obj_set_flex_flow(eye_btn, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(eye_btn, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    // Styled as its own chip matching the textarea's background, rather
+    // than floating bare over the screen background.
+    lv_obj_set_style_bg_color(eye_btn, lv_color_hex(0x171B21), 0);
+    lv_obj_set_style_bg_opa(eye_btn, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(eye_btn, 10, 0);
     lv_obj_add_event_cb(eye_btn, wifi_password_eye_toggle_cb, LV_EVENT_CLICKED, NULL);
 
     lv_obj_t *eye_icon = lv_label_create(eye_btn);
     lv_obj_set_style_text_color(eye_icon, COLOR_MUTED, 0);
+    lv_obj_set_style_text_font(eye_icon, &lv_font_montserrat_18, 0);
     lv_label_set_text(eye_icon, LV_SYMBOL_EYE_CLOSE); // starts masked, matches lv_textarea_set_password_mode(true) above
+
+    // Connecting/error status - replaces a static hint, only shown once a
+    // connect attempt is under way (see wifi_password_connect_cb()/
+    // wifi_password_poll()).
+    s_wifi_password_status = lv_label_create(fields_wrap);
+    lv_obj_set_style_text_color(s_wifi_password_status, COLOR_MUTED, 0);
+    lv_obj_set_style_text_font(s_wifi_password_status, &lv_font_montserrat_14, 0);
+    lv_obj_set_width(s_wifi_password_status, field_row_width_px);
+    lv_label_set_long_mode(s_wifi_password_status, LV_LABEL_LONG_WRAP);
+    lv_obj_set_style_margin_left(s_wifi_password_status, 20, 0);
+    lv_obj_set_style_margin_top(s_wifi_password_status, 10, 0);
+    lv_label_set_text(s_wifi_password_status, "");
 
     s_wifi_password_keyboard = lv_keyboard_create(s_wifi_password_screen);
     style_dark_keyboard(s_wifi_password_keyboard);
+    // Default height is 50% of parent (LV_PCT(50), see lv_keyboard_class in
+    // LVGL); shrink 50px shorter than that to leave more room above it.
+    lv_obj_set_height(s_wifi_password_keyboard,
+                       (BOARD_JC4880P443C_LCD_V_RES - STATUSBAR_HEIGHT_PX) / 2 - 50);
+
+    // Set up all four keyboard modes: text lower/upper, symbols mode 1, symbols mode 2
     lv_keyboard_set_map(s_wifi_password_keyboard, LV_KEYBOARD_MODE_TEXT_LOWER, s_wifi_kb_map_lc, s_wifi_kb_ctrl_map);
     lv_keyboard_set_map(s_wifi_password_keyboard, LV_KEYBOARD_MODE_TEXT_UPPER, s_wifi_kb_map_uc, s_wifi_kb_ctrl_map);
+    lv_keyboard_set_map(s_wifi_password_keyboard, WIFI_KB_MODE_SYM_1, s_wifi_kb_map_sym_1, s_wifi_kb_ctrl_map_sym);
+    lv_keyboard_set_map(s_wifi_password_keyboard, WIFI_KB_MODE_SYM_2, s_wifi_kb_map_sym_2, s_wifi_kb_ctrl_map_sym);
+
     lv_keyboard_set_mode(s_wifi_password_keyboard, LV_KEYBOARD_MODE_TEXT_LOWER);
     lv_obj_remove_event_cb(s_wifi_password_keyboard, lv_keyboard_def_event_cb);
     lv_obj_add_event_cb(s_wifi_password_keyboard, wifi_keyboard_event_cb, LV_EVENT_VALUE_CHANGED, NULL);
-    // LV_EVENT_DRAW_TASK_ADDED is gated behind this flag (see
-    // lv_draw_finalize_task_creation() in lv_draw.c) - without it the event
-    // never fires at all, regardless of the add_event_cb() call below.
-    lv_obj_add_flag(s_wifi_password_keyboard, LV_OBJ_FLAG_SEND_DRAW_TASK_EVENTS);
-    lv_obj_add_event_cb(s_wifi_password_keyboard, wifi_keyboard_draw_event_cb, LV_EVENT_DRAW_TASK_ADDED, NULL);
     lv_obj_add_flag(s_wifi_password_keyboard, LV_OBJ_FLAG_HIDDEN);
 }
 
@@ -1408,12 +1714,11 @@ static int cmd_nav(int argc, char **argv)
         strncpy(s_wifi_pending_ssid, ssid, WIFI_MANAGER_SSID_MAX);
         s_wifi_pending_ssid[WIFI_MANAGER_SSID_MAX] = '\0';
         lv_textarea_set_text(s_wifi_password_input, "");
-        lv_label_set_text(s_wifi_password_title, s_wifi_pending_ssid);
+        wifi_password_screen_set_ssid(s_wifi_pending_ssid, true);
         show_settings_view(SETTINGS_VIEW_WIFI_PASSWORD);
 
-        // Mirrors wifi_password_focus_cb() - a real tap on the textarea
-        // would show the keyboard too, and this screen reads as empty
-        // without it.
+        // Mirrors wifi_field_focus_cb() - a real tap on the textarea would
+        // show the keyboard too, and this screen reads as empty without it.
         lv_keyboard_set_textarea(s_wifi_password_keyboard, s_wifi_password_input);
         lv_obj_remove_flag(s_wifi_password_keyboard, LV_OBJ_FLAG_HIDDEN);
     }
