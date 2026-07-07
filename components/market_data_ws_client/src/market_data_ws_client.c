@@ -128,7 +128,7 @@ static void ws_event_handler(void *handler_arg, esp_event_base_t base, int32_t e
     }
 }
 
-esp_err_t market_data_ws_client_start(const char *const *symbols, uint8_t symbol_count)
+esp_err_t market_data_ws_client_create(const char *const *symbols, uint8_t symbol_count)
 {
     if (symbols == NULL || symbol_count == 0)
     {
@@ -169,7 +169,26 @@ esp_err_t market_data_ws_client_start(const char *const *symbols, uint8_t symbol
         return err;
     }
 
+    return ESP_OK;
+}
+
+esp_err_t market_data_ws_client_connect(void)
+{
+    if (s_client == NULL)
+    {
+        return ESP_ERR_INVALID_STATE;
+    }
     return esp_websocket_client_start(s_client);
+}
+
+esp_err_t market_data_ws_client_start(const char *const *symbols, uint8_t symbol_count)
+{
+    esp_err_t err = market_data_ws_client_create(symbols, symbol_count);
+    if (err != ESP_OK)
+    {
+        return err;
+    }
+    return market_data_ws_client_connect();
 }
 
 void market_data_ws_client_stop(void)

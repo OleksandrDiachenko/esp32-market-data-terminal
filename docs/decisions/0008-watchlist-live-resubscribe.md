@@ -94,3 +94,12 @@ sending a text frame on a long-established socket does not do.
   `app_state_ws_task.c` themselves (impure: PSRAM/mutex/FreeRTOS task
   entrypoints, consistent with this codebase's existing host-test
   boundary) - the new pure control-message builder is covered instead.
+- The lack of hardware coverage here did let a real bug through:
+  `ws_task_fn()`'s `xQueueAddToSet()` calls had their return values
+  discarded, and `market_data_ws_client_start()` began receiving ticks
+  before the queue-set registration ran - FreeRTOS requires a queue to be
+  empty when joining a set, so a tick arriving in that window could
+  silently and permanently orphan the update queue. Found and fixed during
+  the `docs/debugging/watchlist-add-freeze.md` investigation by splitting
+  `market_data_ws_client_start()` into `_create()`/`_connect()` so the
+  queue set is joined while still provably empty, before connecting.

@@ -107,3 +107,15 @@ CONFIG_LV_FONT_MONTSERRAT_12=y
 CONFIG_LV_FONT_MONTSERRAT_16=y
 CONFIG_LV_FONT_MONTSERRAT_18=y
 CONFIG_LV_FONT_MONTSERRAT_20=y
+
+# The default 64KB LVGL heap left only ~11KB (measured via lv_mem_monitor())
+# once the watchlist dashboard's row/chart widgets grew to 9 of the 10
+# possible symbols - one more chart's first lv_realloc() (each needs its own
+# ~1.15KB point buffer, plus per-row containers/labels) exhausted it, and
+# LVGL's LV_ASSERT_MALLOC handler traps in an infinite while(1) on the LVGL
+# task on allocation failure - a total, silent UI freeze (LV_USE_LOG is off,
+# so the assert's own message never printed either). Doubling to 128KB
+# leaves ample headroom at the 10-symbol cap (measured ~142KB free on the
+# surrounding system-level internal heap at the time, so this is well within
+# budget) - see docs/debugging/watchlist-add-freeze.md.
+CONFIG_LV_MEM_SIZE_KILOBYTES=128

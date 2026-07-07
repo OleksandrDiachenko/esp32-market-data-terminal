@@ -70,17 +70,20 @@ static void ws_task_fn(void *arg)
         symbols[i] = symbol_storage[i];
     }
 
-    esp_err_t err = market_data_ws_client_start(symbols, count);
+    esp_err_t err = market_data_ws_client_create(symbols, count);
     if (err != ESP_OK)
     {
-        ESP_LOGW(TAG, "market_data_ws_client_start failed: %s; WS consumer task exiting", esp_err_to_name(err));
+        ESP_LOGW(TAG, "market_data_ws_client_create failed: %s; WS consumer task exiting", esp_err_to_name(err));
         vTaskDelete(NULL);
         return;
     }
 
     // Sole consumer of this queue by design - market_data_kline_update_t is
     // a point-to-point FreeRTOS queue, not a broadcast (same reasoning as
-    // app_state_sync_task.c's use of wifi_manager_get_event_queue()).
+    // app_state_sync_task.c's use of wifi_manager_get_event_queue()). Safe
+    // to join to a queue set now, before market_data_ws_client_connect(),
+    // while it's still guaranteed empty - see market_data_ws_client_create()
+    // and market_data_ws_client_connect()'s doc comments.
     QueueHandle_t updates = market_data_ws_client_get_update_queue();
     if (updates == NULL)
     {
@@ -94,15 +97,22 @@ static void ws_task_fn(void *arg)
     // of picking one to poll and the other to block on.
     QueueHandle_t watchlist_events = app_state_get_watchlist_event_queue();
     QueueSetHandle_t queue_set = xQueueCreateSet(MARKET_DATA_WS_UPDATE_QUEUE_LEN + APP_STATE_WATCHLIST_EVENT_QUEUE_LEN);
-    if (queue_set != NULL && watchlist_events != NULL)
+    if (queue_set == NULL || watchlist_events == NULL || xQueueAddToSet(updates, queue_set) != pdPASS ||
+        xQueueAddToSet(watchlist_events, queue_set) != pdPASS)
     {
-        xQueueAddToSet(updates, queue_set);
-        xQueueAddToSet(watchlist_events, queue_set);
-    }
-    else
-    {
-        ESP_LOGW(TAG, "Queue set unavailable; watchlist edits won't live-resubscribe until reboot");
+        ESP_LOGE(TAG, "Queue set setup failed; watchlist edits won't live-resubscribe until reboot");
         queue_set = NULL;
+    }
+
+    // Only now can WEBSOCKET_EVENT_DATA start populating `updates` - if the
+    // queue set setup above succeeded, it's already a member, so no tick
+    // can be missed.
+    err = market_data_ws_client_connect();
+    if (err != ESP_OK)
+    {
+        ESP_LOGW(TAG, "market_data_ws_client_connect failed: %s; WS consumer task exiting", esp_err_to_name(err));
+        vTaskDelete(NULL);
+        return;
     }
 
     market_data_kline_update_t update;
