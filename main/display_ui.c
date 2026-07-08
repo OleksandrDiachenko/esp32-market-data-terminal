@@ -1209,24 +1209,43 @@ static void wifi_keyboard_event_cb(lv_event_t *e)
         wifi_password_connect_cb(e);
         return;
     }
+    // Every branch below re-asserts this keyboard's own map/ctrl-map right
+    // after lv_keyboard_set_mode() rather than trusting its result: LVGL
+    // stores per-mode maps in one *global* table shared by every lv_keyboard
+    // in the app (kb_map[]/kb_ctrl[] in lv_keyboard.c - there is no
+    // per-object storage, even for the built-in TEXT_LOWER/TEXT_UPPER
+    // modes), so whichever keyboard last called lv_keyboard_set_map() for a
+    // given mode silently wins for every other keyboard using that same
+    // mode too. The watchlist "Add symbol" keyboard shares TEXT_LOWER/UPPER
+    // with this one and is built after it, so without this override,
+    // switching case here would render *its* "Search" action key instead of
+    // "Connect".
     if (strcmp(txt, "ABC") == 0)
     {
         lv_keyboard_set_mode(kb, LV_KEYBOARD_MODE_TEXT_UPPER);
+        lv_buttonmatrix_set_map(kb, s_wifi_kb_map_uc);
+        lv_buttonmatrix_set_ctrl_map(kb, s_wifi_kb_ctrl_map);
         return;
     }
     if (strcmp(txt, "abc") == 0)
     {
         lv_keyboard_set_mode(kb, LV_KEYBOARD_MODE_TEXT_LOWER);
+        lv_buttonmatrix_set_map(kb, s_wifi_kb_map_lc);
+        lv_buttonmatrix_set_ctrl_map(kb, s_wifi_kb_ctrl_map);
         return;
     }
     if (strcmp(txt, "123") == 0 || strcmp(txt, "!?*") == 0)
     {
         lv_keyboard_set_mode(kb, WIFI_KB_MODE_SYM_1);
+        lv_buttonmatrix_set_map(kb, s_wifi_kb_map_sym_1);
+        lv_buttonmatrix_set_ctrl_map(kb, s_wifi_kb_ctrl_map_sym);
         return;
     }
     if (strcmp(txt, "#+=") == 0)
     {
         lv_keyboard_set_mode(kb, WIFI_KB_MODE_SYM_2);
+        lv_buttonmatrix_set_map(kb, s_wifi_kb_map_sym_2);
+        lv_buttonmatrix_set_ctrl_map(kb, s_wifi_kb_ctrl_map_sym);
         return;
     }
 
@@ -2160,24 +2179,39 @@ static void watchlist_add_keyboard_event_cb(lv_event_t *e)
         watchlist_add_check_cb(e);
         return;
     }
+    // See the matching comment in wifi_keyboard_event_cb(): lv_keyboard's
+    // per-mode maps live in one global table shared by every lv_keyboard in
+    // the app, so each branch re-asserts this keyboard's own map/ctrl-map
+    // right after lv_keyboard_set_mode() instead of trusting it - otherwise
+    // this keyboard (built after the Wi-Fi one, sharing its TEXT_LOWER/UPPER
+    // modes) would keep winning that table and the Wi-Fi keyboard would show
+    // "Search" instead of "Connect" after any case switch.
     if (strcmp(txt, "ABC") == 0)
     {
         lv_keyboard_set_mode(kb, LV_KEYBOARD_MODE_TEXT_UPPER);
+        lv_buttonmatrix_set_map(kb, s_watchlist_kb_map_uc);
+        lv_buttonmatrix_set_ctrl_map(kb, s_watchlist_kb_ctrl_map);
         return;
     }
     if (strcmp(txt, "abc") == 0)
     {
         lv_keyboard_set_mode(kb, LV_KEYBOARD_MODE_TEXT_LOWER);
+        lv_buttonmatrix_set_map(kb, s_watchlist_kb_map_lc);
+        lv_buttonmatrix_set_ctrl_map(kb, s_watchlist_kb_ctrl_map);
         return;
     }
     if (strcmp(txt, "123") == 0 || strcmp(txt, "!?*") == 0)
     {
         lv_keyboard_set_mode(kb, WATCHLIST_KB_MODE_SYM_1);
+        lv_buttonmatrix_set_map(kb, s_watchlist_kb_map_sym_1);
+        lv_buttonmatrix_set_ctrl_map(kb, s_watchlist_kb_ctrl_map_sym);
         return;
     }
     if (strcmp(txt, "#+=") == 0)
     {
         lv_keyboard_set_mode(kb, WATCHLIST_KB_MODE_SYM_2);
+        lv_buttonmatrix_set_map(kb, s_watchlist_kb_map_sym_2);
+        lv_buttonmatrix_set_ctrl_map(kb, s_watchlist_kb_ctrl_map_sym);
         return;
     }
 
