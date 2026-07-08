@@ -149,7 +149,11 @@ def main():
     parser.add_argument("--baud", type=int, default=115200)
     parser.add_argument("--timeout", type=float, default=15.0, help="Read timeout in seconds")
     parser.add_argument(
-        "--nav", choices=["watchlist", "settings", "wifi", "wifi_password", "watchlist_manage", "watchlist_add"],
+        "--nav",
+        choices=[
+            "watchlist", "settings", "wifi", "wifi_password", "watchlist_manage", "watchlist_add", "time",
+            "time_format", "date_format", "time_zones", "time_zone_cities",
+        ],
         help="Navigate to this screen (via the device's dev-only 'nav' console command) before capturing",
     )
     parser.add_argument("--ssid", help="SSID title to show on the password screen (only used with --nav wifi_password)")

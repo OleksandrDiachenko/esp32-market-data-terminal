@@ -18,6 +18,7 @@
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
@@ -31,6 +32,7 @@ static const char *TAG = "display_ui";
 #define SETTINGS_LIST_HEADER_HEIGHT_PX 64
 #define SUBHEADER_HEIGHT_PX 64
 #define SETTINGS_ICON_CHIP_PX 40
+#define TIME_LIST_ROW_HEIGHT_PX 60 // Time format / Date format / Time zones list rows
 #define NAV_BUTTON_WIDTH_PX 130
 #define WIFI_PASSWORD_FIELD_HEIGHT_PX 54 // matches the eye-toggle button below it
 #define UPDATE_PERIOD_MS 1000
@@ -58,6 +60,10 @@ typedef enum
 {
     SETTINGS_VIEW_LIST = 0,
     SETTINGS_VIEW_LOCALE,
+    SETTINGS_VIEW_TIME_FORMAT,
+    SETTINGS_VIEW_DATE_FORMAT,
+    SETTINGS_VIEW_TIME_ZONES,
+    SETTINGS_VIEW_TIME_ZONE_CITIES,
     SETTINGS_VIEW_WIFI,
     SETTINGS_VIEW_WIFI_PASSWORD,
     SETTINGS_VIEW_WATCHLIST_MANAGE,
@@ -94,8 +100,23 @@ static settings_view_t s_settings_view;
 
 static lv_obj_t *s_locale_screen;
 
-// Loaded once at startup; kept up to date by locale_24h_toggle_cb() as the
-// Locale screen saves changes.
+// Settings > Time > Time format / Date format / Time zones. Time format and
+// Date format are small fixed lists built once; each row's checkmark is a
+// child created up front and just hidden/shown on selection. Time zones is
+// two screens (region list, then that region's cities) - the city list's
+// content depends on which region was tapped, so it's cleared and rebuilt
+// each time (see show_time_zone_cities()).
+static lv_obj_t *s_time_format_screen;
+static lv_obj_t *s_time_format_check_12h;
+static lv_obj_t *s_time_format_check_24h;
+static lv_obj_t *s_date_format_screen;
+static lv_obj_t *s_time_zone_screen;
+static lv_obj_t *s_time_zone_city_screen;
+static lv_obj_t *s_time_zone_city_list;
+static lv_obj_t *s_time_zone_city_subtitle;
+
+// Loaded once at startup; kept up to date by the Time format/Date
+// format/Time zones screens as they save changes.
 static locale_settings_t s_locale;
 
 // Composed/sorted view of one network for display: the connected network
@@ -504,6 +525,10 @@ static void show_settings_view(settings_view_t view)
     s_settings_view = view;
     lv_obj_add_flag(s_settings_list, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(s_locale_screen, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(s_time_format_screen, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(s_date_format_screen, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(s_time_zone_screen, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(s_time_zone_city_screen, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(s_wifi_screen, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(s_wifi_password_screen, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(s_watchlist_manage_screen, LV_OBJ_FLAG_HIDDEN);
@@ -514,6 +539,18 @@ static void show_settings_view(settings_view_t view)
     {
     case SETTINGS_VIEW_LOCALE:
         target = s_locale_screen;
+        break;
+    case SETTINGS_VIEW_TIME_FORMAT:
+        target = s_time_format_screen;
+        break;
+    case SETTINGS_VIEW_DATE_FORMAT:
+        target = s_date_format_screen;
+        break;
+    case SETTINGS_VIEW_TIME_ZONES:
+        target = s_time_zone_screen;
+        break;
+    case SETTINGS_VIEW_TIME_ZONE_CITIES:
+        target = s_time_zone_city_screen;
         break;
     case SETTINGS_VIEW_WIFI:
         target = s_wifi_screen;
@@ -542,6 +579,10 @@ static void set_active_screen(display_ui_screen_t screen)
         lv_obj_remove_flag(s_rows_container, LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(s_settings_list, LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(s_locale_screen, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(s_time_format_screen, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(s_date_format_screen, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(s_time_zone_screen, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(s_time_zone_city_screen, LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(s_wifi_screen, LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(s_wifi_password_screen, LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(s_watchlist_manage_screen, LV_OBJ_FLAG_HIDDEN);
@@ -581,6 +622,8 @@ static void settings_back_cb(lv_event_t *e)
     show_settings_view(SETTINGS_VIEW_LIST);
 }
 
+static void tz_describe(const char *tz_label, const char *posix, char *out, size_t out_len); // with the Time screens, below
+
 static void update_statusbar(void)
 {
     if (time_sync_is_synced())
@@ -589,8 +632,12 @@ static void update_statusbar(void)
         struct tm tm_now;
         localtime_r(&now, &tm_now);
 
-        char clock_buf[24];
-        strftime(clock_buf, sizeof(clock_buf), s_locale.time_24h ? "%d %b %Y  %H:%M" : "%d %b %Y  %I:%M %p", &tm_now);
+        char clock_fmt[32];
+        const char *date_fmt = s_locale.date_format[0] != '\0' ? s_locale.date_format : "%d %b %Y";
+        snprintf(clock_fmt, sizeof(clock_fmt), "%s  %s", date_fmt, s_locale.time_24h ? "%H:%M" : "%I:%M %p");
+
+        char clock_buf[40];
+        strftime(clock_buf, sizeof(clock_buf), clock_fmt, &tm_now);
         lv_label_set_text(s_clock_label, clock_buf);
     }
     else
@@ -634,7 +681,11 @@ static void update_statusbar(void)
     {
         lv_label_set_text(s_settings_wifi_row_desc, "Not connected");
     }
-    lv_label_set_text(s_settings_locale_row_desc, s_locale.time_24h ? "24-hour clock" : "12-hour clock");
+    char tz_desc[40];
+    tz_describe(s_locale.tz_label, s_locale.posix_tz, tz_desc, sizeof(tz_desc));
+    // Plain ASCII separator, not a middle-dot - see build_wifi_ap_row()'s
+    // "Saved - Not in range" for why (vendored Montserrat has no such glyph).
+    lv_label_set_text_fmt(s_settings_locale_row_desc, "%s - %s", s_locale.time_24h ? "24-hour" : "12-hour", tz_desc);
 
     uint8_t watchlist_count = app_state_symbol_count();
     if (watchlist_count > SETTINGS_MAX_WATCHLIST)
@@ -786,22 +837,11 @@ static void make_plain_container(lv_obj_t *obj)
                                 LV_OBJ_FLAG_GESTURE_BUBBLE);
 }
 
-// lv_switch/lv_textarea/lv_keyboard all render with LVGL's built-in default
-// theme unless restyled - light/blue chrome that clashes badly with this
-// screen's near-black background. These three helpers are this file's only
-// native (non-fully-custom) widgets, so their dark-theme styling lives here
-// rather than repeated per call site.
-static void style_dark_switch(lv_obj_t *sw)
-{
-    lv_obj_set_style_bg_color(sw, lv_color_hex(0x2A2F38), LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(sw, LV_OPA_COVER, LV_PART_MAIN);
-    lv_obj_set_style_border_width(sw, 0, LV_PART_MAIN);
-    lv_obj_set_style_bg_color(sw, COLOR_UP, LV_PART_MAIN | LV_STATE_CHECKED);
-    lv_obj_set_style_bg_color(sw, COLOR_INK, LV_PART_KNOB);
-    lv_obj_set_style_bg_opa(sw, LV_OPA_COVER, LV_PART_KNOB);
-    lv_obj_set_style_border_width(sw, 0, LV_PART_KNOB);
-}
-
+// lv_textarea/lv_keyboard both render with LVGL's built-in default theme
+// unless restyled - light/blue chrome that clashes badly with this screen's
+// near-black background. These two helpers are this file's only native
+// (non-fully-custom) widgets, so their dark-theme styling lives here rather
+// than repeated per call site.
 static void style_dark_textarea(lv_obj_t *ta)
 {
     lv_obj_set_style_bg_color(ta, lv_color_hex(0x171B21), 0);
@@ -968,6 +1008,125 @@ static lv_obj_t *build_subscreen_header(lv_obj_t *parent, const char *title, con
     lv_obj_set_style_text_font(subtitle_label, &lv_font_montserrat_12, 0);
     lv_label_set_text(subtitle_label, subtitle);
     return subtitle_label;
+}
+
+// A plain tappable row: title on the left, chevron on the right - no icon
+// chip or description. Used by Settings > Time's root screen and the Time
+// zones region list, where build_settings_row()'s icon chip would be
+// redundant repeated three/eight times on one screen.
+static lv_obj_t *build_nav_row(lv_obj_t *parent, const char *title, lv_event_cb_t click_cb, void *user_data)
+{
+    lv_obj_t *row = lv_obj_create(parent);
+    lv_obj_remove_style_all(row);
+    make_plain_container(row);
+    // CLICKABLE without SCROLLABLE, so a drag starting on this row must
+    // chain up to the scrollable body list instead - but make_plain_container()
+    // also strips SCROLL_CHAIN, and LVGL's scroll-object search
+    // (lv_indev_find_scroll_obj()) stops at the very first non-scrollable
+    // ancestor that lacks it, never reaching that scrollable parent. Add it
+    // back or every row-filled list here is unscrollable past its own
+    // height - see build_time_subscreen()'s body.
+    lv_obj_add_flag(row, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLL_CHAIN);
+    lv_obj_set_size(row, LV_PCT(100), TIME_LIST_ROW_HEIGHT_PX);
+    lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(row, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_left(row, 20, 0);
+    lv_obj_set_style_pad_right(row, 20, 0);
+    lv_obj_set_style_border_side(row, LV_BORDER_SIDE_BOTTOM, 0);
+    lv_obj_set_style_border_width(row, 1, 0);
+    lv_obj_set_style_border_color(row, COLOR_HAIRLINE, 0);
+    lv_obj_add_event_cb(row, click_cb, LV_EVENT_CLICKED, user_data);
+
+    lv_obj_t *title_label = lv_label_create(row);
+    lv_obj_set_style_text_color(title_label, COLOR_TEXT, 0);
+    lv_obj_set_style_text_font(title_label, &lv_font_montserrat_16, 0);
+    lv_label_set_text(title_label, title);
+
+    lv_obj_t *chevron = lv_label_create(row);
+    lv_obj_set_style_text_color(chevron, COLOR_MUTED, 0);
+    lv_label_set_text(chevron, LV_SYMBOL_RIGHT);
+
+    return row;
+}
+
+// A tappable row for a single choice in a list of mutually-exclusive
+// options: title on the left, a checkmark on the right when is_current is
+// true. Used by the Time zone city list, which is rebuilt from scratch per
+// region (see show_time_zone_cities()) so it can't pre-create hidden
+// checkmarks the way the fixed-length Time format/Date format lists do.
+static lv_obj_t *build_selectable_row(lv_obj_t *parent, const char *title, bool is_current, lv_event_cb_t click_cb,
+                                       void *user_data)
+{
+    lv_obj_t *row = lv_obj_create(parent);
+    lv_obj_remove_style_all(row);
+    make_plain_container(row);
+    // See build_nav_row()'s comment on LV_OBJ_FLAG_SCROLL_CHAIN - without it
+    // a drag starting on this row can't reach the scrollable parent list.
+    lv_obj_add_flag(row, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLL_CHAIN);
+    lv_obj_set_size(row, LV_PCT(100), TIME_LIST_ROW_HEIGHT_PX);
+    lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(row, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_left(row, 20, 0);
+    lv_obj_set_style_pad_right(row, 20, 0);
+    lv_obj_set_style_border_side(row, LV_BORDER_SIDE_BOTTOM, 0);
+    lv_obj_set_style_border_width(row, 1, 0);
+    lv_obj_set_style_border_color(row, COLOR_HAIRLINE, 0);
+    lv_obj_add_event_cb(row, click_cb, LV_EVENT_CLICKED, user_data);
+
+    lv_obj_t *title_label = lv_label_create(row);
+    lv_obj_set_style_text_color(title_label, COLOR_TEXT, 0);
+    lv_obj_set_style_text_font(title_label, &lv_font_montserrat_16, 0);
+    lv_label_set_text(title_label, title);
+
+    if (is_current)
+    {
+        lv_obj_t *check = lv_label_create(row);
+        lv_obj_set_style_text_color(check, COLOR_ACCENT, 0);
+        lv_label_set_text(check, LV_SYMBOL_OK);
+    }
+
+    return row;
+}
+
+// A Time sub-screen's shared skeleton: a plain fixed-height column holding
+// build_subscreen_header() plus a scrollable body flex column that the
+// caller fills with rows (build_nav_row()/build_selectable_row()). Mirrors
+// the outer-plain/inner-scrollable split already used by the Wi-Fi and
+// Watchlist manage screens (see s_wifi_list/s_watchlist_list).
+static lv_obj_t *build_time_subscreen(lv_obj_t *screen, lv_obj_t **out_screen, const char *title,
+                                       const char *subtitle, lv_obj_t **out_subtitle_label, lv_event_cb_t back_cb)
+{
+    lv_obj_t *sub = lv_obj_create(screen);
+    lv_obj_remove_style_all(sub);
+    make_plain_container(sub);
+    lv_obj_set_size(sub, LV_PCT(100), BOARD_JC4880P443C_LCD_V_RES - STATUSBAR_HEIGHT_PX);
+    lv_obj_set_flex_flow(sub, LV_FLEX_FLOW_COLUMN);
+    if (out_screen)
+    {
+        *out_screen = sub;
+    }
+
+    lv_obj_t *subtitle_label = build_subscreen_header(sub, title, subtitle, back_cb);
+    if (out_subtitle_label)
+    {
+        *out_subtitle_label = subtitle_label;
+    }
+
+    lv_obj_t *body = lv_obj_create(sub);
+    lv_obj_remove_style_all(body);
+    lv_obj_remove_flag(body, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CLICK_FOCUSABLE | LV_OBJ_FLAG_PRESS_LOCK |
+                                  LV_OBJ_FLAG_GESTURE_BUBBLE | LV_OBJ_FLAG_SNAPPABLE);
+    lv_obj_set_width(body, LV_PCT(100));
+    // An explicit height, not flex_grow: with flex_grow, LVGL sized this to
+    // its *content* (every row added) rather than clipping to the space
+    // left under the header, so a full list rendered past the status bar
+    // with nothing left to actually scroll - no overflow, no scrollbar.
+    lv_obj_set_height(body, BOARD_JC4880P443C_LCD_V_RES - STATUSBAR_HEIGHT_PX - SUBHEADER_HEIGHT_PX);
+    lv_obj_set_flex_flow(body, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_scroll_dir(body, LV_DIR_VER);
+    lv_obj_set_scrollbar_mode(body, LV_SCROLLBAR_MODE_AUTO);
+
+    return body;
 }
 
 // Shared by both the SSID field (only when editable - the "Add Network"
@@ -2959,18 +3118,991 @@ static void build_settings_list(lv_obj_t *screen)
     s_settings_wifi_row_desc =
         build_settings_row(s_settings_list, LV_SYMBOL_WIFI, "Wi-Fi", "--", wifi_row_click_cb);
     // LVGL's built-in symbol set has no clock/calendar glyph - the gear is
-    // the closest available placeholder, not a dedicated "date & time" icon.
+    // the closest available placeholder, not a dedicated "time" icon.
     s_settings_locale_row_desc =
-        build_settings_row(s_settings_list, LV_SYMBOL_SETTINGS, "Date & time", "--", locale_row_click_cb);
+        build_settings_row(s_settings_list, LV_SYMBOL_SETTINGS, "Time", "--", locale_row_click_cb);
     s_settings_watchlist_row_desc =
         build_settings_row(s_settings_list, LV_SYMBOL_LIST, "Watchlist symbols", "--", watchlist_row_click_cb);
 }
 
-static void locale_24h_toggle_cb(lv_event_t *e)
+// --- Settings > Time > Date format ---
+
+typedef struct
 {
-    lv_obj_t *toggle = lv_event_get_target(e);
-    s_locale.time_24h = lv_obj_has_state(toggle, LV_STATE_CHECKED);
+    const char *mask;   // human-readable pattern shown in the row, e.g. "DD/MM/YYYY"
+    const char *format; // strftime() pattern that actually produces it
+} date_format_option_t;
+
+static const date_format_option_t s_date_formats[] = {
+    { "DDD DD MMM", "%a %d %b" },
+    { "DD MMM YYYY", "%d %b %Y" },
+    { "MMM DD, YYYY", "%b %d, %Y" },
+    { "DD/MM/YYYY", "%d/%m/%Y" },
+    { "MM/DD/YYYY", "%m/%d/%Y" },
+    { "YYYY/MM/DD", "%Y/%m/%d" },
+    { "YYYY-MM-DD", "%Y-%m-%d" },
+    { "DD-MM-YYYY", "%d-%m-%Y" },
+    { "MM-DD-YYYY", "%m-%d-%Y" },
+    { "DD.MM.YYYY", "%d.%m.%Y" },
+    { "MM.DD.YYYY", "%m.%d.%Y" },
+    { "YYYY.MM.DD", "%Y.%m.%d" },
+};
+#define DATE_FORMAT_COUNT (sizeof(s_date_formats) / sizeof(s_date_formats[0]))
+
+// Parallel to s_date_formats[] - each row's checkmark, hidden/shown on
+// selection (see date_format_row_click_cb()).
+static lv_obj_t *s_date_format_checks[DATE_FORMAT_COUNT];
+
+// --- Settings > Time > Time zones ---
+//
+// Region -> city -> POSIX TZ string, structured the same way as the
+// sibling siswood-sc01-plus project's Settings > Time > Time zones (same
+// region/city/POSIX data, just renamed to this file's s_/tz_ conventions).
+// tz_entry_t.posix indexes s_tz_posix_strings[] rather than embedding the
+// POSIX string directly, since most cities within a region share one DST
+// rule (e.g. every CET/CEST city in Europe).
+
+typedef enum {
+    TZ_ZONE_AMERICA,
+    TZ_ZONE_ASIA,
+    TZ_ZONE_ATLANTIC,
+    TZ_ZONE_AUSTRALIA,
+    TZ_ZONE_AFRICA,
+    TZ_ZONE_EUROPE,
+    TZ_ZONE_INDIAN,
+    TZ_ZONE_PACIFIC,
+    TZ_ZONE_COUNT,
+} tz_zone_id_t;
+
+static const char *const s_tz_zone_names[TZ_ZONE_COUNT] = {
+    [TZ_ZONE_AMERICA] = "America",
+    [TZ_ZONE_ASIA] = "Asia",
+    [TZ_ZONE_ATLANTIC] = "Atlantic",
+    [TZ_ZONE_AUSTRALIA] = "Australia",
+    [TZ_ZONE_AFRICA] = "Africa",
+    [TZ_ZONE_EUROPE] = "Europe",
+    [TZ_ZONE_INDIAN] = "Indian",
+    [TZ_ZONE_PACIFIC] = "Pacific",
+};
+
+typedef enum {
+    TZ_P_UTC0,
+    TZ_P_GMT_BST,
+    TZ_P_WET_WEST,
+    TZ_P_AZOT,
+    TZ_P_GMT_NO_DST,
+    TZ_P_CET_CEST,
+    TZ_P_EET_EEST,
+    TZ_P_TRT,
+    TZ_P_IST_IDT,
+    TZ_P_MSK,
+    TZ_P_GET,
+    TZ_P_AMT_ARM,
+    TZ_P_AZT,
+    TZ_P_AST3,
+    TZ_P_GST4,
+    TZ_P_IRST,
+    TZ_P_EET_NO_DST,
+    TZ_P_SAST,
+    TZ_P_CAT,
+    TZ_P_EAT,
+    TZ_P_CET_NO_DST,
+    TZ_P_WAT,
+    TZ_P_MUT,
+    TZ_P_SCT,
+    TZ_P_CVT,
+    TZ_P_PKT,
+    TZ_P_IST_INDIA,
+    TZ_P_SLST,
+    TZ_P_NPT,
+    TZ_P_BDT,
+    TZ_P_MMT,
+    TZ_P_AQTT,
+    TZ_P_ALMT,
+    TZ_P_XJT,
+    TZ_P_ICT,
+    TZ_P_WIB,
+    TZ_P_WITA,
+    TZ_P_WIT,
+    TZ_P_CST_CHINA,
+    TZ_P_HKT,
+    TZ_P_SGT,
+    TZ_P_PHT,
+    TZ_P_JST,
+    TZ_P_KST,
+    TZ_P_ULAT,
+    TZ_P_VLAT,
+    TZ_P_AWST,
+    TZ_P_ACST,
+    TZ_P_ACST_ACDT,
+    TZ_P_AEST,
+    TZ_P_AEST_AEDT,
+    TZ_P_LHST,
+    TZ_P_PGT,
+    TZ_P_NCT,
+    TZ_P_NZST_NZDT,
+    TZ_P_FJT,
+    TZ_P_TAHT,
+    TZ_P_MART,
+    TZ_P_AKST_AKDT,
+    TZ_P_PST_PDT,
+    TZ_P_MST_MDT,
+    TZ_P_MST_NO_DST,
+    TZ_P_CST_CDT,
+    TZ_P_CST_CDT_MX,
+    TZ_P_EST_EDT,
+    TZ_P_AST_ADT,
+    TZ_P_NST_NDT,
+    TZ_P_HST,
+    TZ_P_AST_NO_DST,
+    TZ_P_CST5CDT_CUBA,
+    TZ_P_CST6,
+    TZ_P_EST5,
+    TZ_P_COT,
+    TZ_P_PET,
+    TZ_P_ECT,
+    TZ_P_VET,
+    TZ_P_BOT,
+    TZ_P_CLT_CLST,
+    TZ_P_PYT_PYST,
+    TZ_P_ART,
+    TZ_P_UYT,
+    TZ_P_BRT,
+    TZ_P_AMT4,
+    TZ_P_ACT5,
+    TZ_P_CLST3,
+    TZ_P_FKT3,
+    TZ_P_WGT_WGST,
+} tz_posix_id_t;
+
+static const char *const s_tz_posix_strings[] = {
+    [TZ_P_UTC0] = "UTC0",
+    [TZ_P_GMT_BST] = "GMT0BST,M3.5.0/1,M10.5.0/2",
+    [TZ_P_WET_WEST] = "WET0WEST,M3.5.0/1,M10.5.0/2",
+    [TZ_P_AZOT] = "AZOT1AZOST,M3.5.0/0,M10.5.0/1",
+    [TZ_P_GMT_NO_DST] = "GMT0",
+    [TZ_P_CET_CEST] = "CET-1CEST,M3.5.0/2,M10.5.0/3",
+    [TZ_P_EET_EEST] = "EET-2EEST,M3.5.0/3,M10.5.0/4",
+    [TZ_P_TRT] = "TRT-3",
+    [TZ_P_IST_IDT] = "IST-2IDT,M3.4.4/26,M10.5.0",
+    [TZ_P_MSK] = "MSK-3",
+    [TZ_P_GET] = "GET-4",
+    [TZ_P_AMT_ARM] = "AMT-4",
+    [TZ_P_AZT] = "AZT-4",
+    [TZ_P_AST3] = "AST-3",
+    [TZ_P_GST4] = "GST-4",
+    [TZ_P_IRST] = "IRST-3:30IRDT,M3.4.0/0,M9.4.0/0",
+    [TZ_P_EET_NO_DST] = "EET-2",
+    [TZ_P_SAST] = "SAST-2",
+    [TZ_P_CAT] = "CAT-2",
+    [TZ_P_EAT] = "EAT-3",
+    [TZ_P_CET_NO_DST] = "CET-1",
+    [TZ_P_WAT] = "WAT-1",
+    [TZ_P_MUT] = "MUT-4",
+    [TZ_P_SCT] = "SCT-4",
+    [TZ_P_CVT] = "CVT1",
+    [TZ_P_PKT] = "PKT-5",
+    [TZ_P_IST_INDIA] = "IST-5:30",
+    [TZ_P_SLST] = "SLST-5:30",
+    [TZ_P_NPT] = "NPT-5:45",
+    [TZ_P_BDT] = "BDT-6",
+    [TZ_P_MMT] = "MMT-6:30",
+    [TZ_P_AQTT] = "AQTT-5",
+    [TZ_P_ALMT] = "ALMT-6",
+    [TZ_P_XJT] = "XJT-6",
+    [TZ_P_ICT] = "ICT-7",
+    [TZ_P_WIB] = "WIB-7",
+    [TZ_P_WITA] = "WITA-8",
+    [TZ_P_WIT] = "WIT-9",
+    [TZ_P_CST_CHINA] = "CST-8",
+    [TZ_P_HKT] = "HKT-8",
+    [TZ_P_SGT] = "SGT-8",
+    [TZ_P_PHT] = "PHT-8",
+    [TZ_P_JST] = "JST-9",
+    [TZ_P_KST] = "KST-9",
+    [TZ_P_ULAT] = "ULAT-8",
+    [TZ_P_VLAT] = "VLAT-10",
+    [TZ_P_AWST] = "AWST-8",
+    [TZ_P_ACST] = "ACST-9:30",
+    [TZ_P_ACST_ACDT] = "ACST-9:30ACDT,M10.1.0/2,M4.1.0/3",
+    [TZ_P_AEST] = "AEST-10",
+    [TZ_P_AEST_AEDT] = "AEST-10AEDT,M10.1.0/2,M4.1.0/3",
+    [TZ_P_LHST] = "LHST-10:30LHDT-11,M10.1.0/2,M4.1.0/2",
+    [TZ_P_PGT] = "PGT-10",
+    [TZ_P_NCT] = "NCT-11",
+    [TZ_P_NZST_NZDT] = "NZST-12NZDT,M9.4.0/2,M4.1.0/3",
+    [TZ_P_FJT] = "FJT-12",
+    [TZ_P_TAHT] = "TAHT10",
+    [TZ_P_MART] = "MART9:30",
+    [TZ_P_AKST_AKDT] = "AKST9AKDT,M3.2.0/2,M11.1.0/2",
+    [TZ_P_PST_PDT] = "PST8PDT,M3.2.0/2,M11.1.0/2",
+    [TZ_P_MST_MDT] = "MST7MDT,M3.2.0/2,M11.1.0/2",
+    [TZ_P_MST_NO_DST] = "MST7",
+    [TZ_P_CST_CDT] = "CST6CDT,M3.2.0/2,M11.1.0/2",
+    [TZ_P_CST_CDT_MX] = "CST6CDT,M4.1.0/2,M10.5.0/2",
+    [TZ_P_EST_EDT] = "EST5EDT,M3.2.0/2,M11.1.0/2",
+    [TZ_P_AST_ADT] = "AST4ADT,M3.2.0/2,M11.1.0/2",
+    [TZ_P_NST_NDT] = "NST3:30NDT,M3.2.0/0,M11.1.0/0",
+    [TZ_P_HST] = "HST10",
+    [TZ_P_AST_NO_DST] = "AST4",
+    [TZ_P_CST5CDT_CUBA] = "CST5CDT,M3.2.0/0,M11.1.0/0",
+    [TZ_P_CST6] = "CST6",
+    [TZ_P_EST5] = "EST5",
+    [TZ_P_COT] = "COT5",
+    [TZ_P_PET] = "PET5",
+    [TZ_P_ECT] = "ECT5",
+    [TZ_P_VET] = "VET4:30",
+    [TZ_P_BOT] = "BOT4",
+    [TZ_P_CLT_CLST] = "CLT4CLST,M9.1.0/0,M4.1.0/0",
+    [TZ_P_PYT_PYST] = "PYT4PYST,M10.1.0/0,M3.4.0/0",
+    [TZ_P_ART] = "ART3",
+    [TZ_P_UYT] = "UYT3",
+    [TZ_P_BRT] = "BRT3",
+    [TZ_P_AMT4] = "AMT4",
+    [TZ_P_ACT5] = "ACT5",
+    [TZ_P_CLST3] = "CLST3",
+    [TZ_P_FKT3] = "FKT3",
+    [TZ_P_WGT_WGST] = "WGT3WGST,M3.5.0/22,M10.5.0/23",
+};
+
+typedef enum {
+    TZ_C_ACC_RA,
+    TZ_C_ADDIS_ABABA,
+    TZ_C_ADELAIDE,
+    TZ_C_AQTAU,
+    TZ_C_ALGIERS,
+    TZ_C_ALMATY,
+    TZ_C_AMSTERDAM,
+    TZ_C_ANCHORAGE,
+    TZ_C_ASUNCION,
+    TZ_C_ASTANA,
+    TZ_C_ATHENS,
+    TZ_C_AUCKLAND,
+    TZ_C_AZORES,
+    TZ_C_BAGHDAD,
+    TZ_C_BAKU,
+    TZ_C_BALI,
+    TZ_C_BANGKOK,
+    TZ_C_BEIJING,
+    TZ_C_BELGRADE,
+    TZ_C_BERLIN,
+    TZ_C_BOGOTA,
+    TZ_C_BRATISLAVA,
+    TZ_C_BRISBANE,
+    TZ_C_BRUSSELS,
+    TZ_C_BUCHAREST,
+    TZ_C_BUENOS_AIRES,
+    TZ_C_BUDAPEST,
+    TZ_C_CAIRO,
+    TZ_C_CALGARY,
+    TZ_C_CANARY,
+    TZ_C_CAPE_VERDE,
+    TZ_C_CARACAS,
+    TZ_C_CASABLANCA,
+    TZ_C_CHICAGO,
+    TZ_C_COLOMBO,
+    TZ_C_COPENHAGEN,
+    TZ_C_DAKAR,
+    TZ_C_DALLAS,
+    TZ_C_DARWIN,
+    TZ_C_DENVER,
+    TZ_C_DOHA,
+    TZ_C_DUBAI,
+    TZ_C_DHAKA,
+    TZ_C_DUBLIN,
+    TZ_C_FIJI,
+    TZ_C_FORTALEZA,
+    TZ_C_GUAYAQUIL,
+    TZ_C_HALIFAX,
+    TZ_C_HAVANA,
+    TZ_C_HELSINKI,
+    TZ_C_HOBART,
+    TZ_C_HONG_KONG,
+    TZ_C_HONOLULU,
+    TZ_C_HO_CHI_MINH,
+    TZ_C_ICELAND,
+    TZ_C_ISTANBUL,
+    TZ_C_JAKARTA,
+    TZ_C_JAMAICA,
+    TZ_C_JAYAPURA,
+    TZ_C_JOHANNESBURG,
+    TZ_C_KARACHI,
+    TZ_C_KATHMANDU,
+    TZ_C_KIEV,
+    TZ_C_KUALA_LUMPUR,
+    TZ_C_KOLKATA,
+    TZ_C_KUWAIT,
+    TZ_C_LAGOS,
+    TZ_C_LA_PAZ,
+    TZ_C_LIMA,
+    TZ_C_LISBON,
+    TZ_C_LJUBLJANA,
+    TZ_C_LONDON,
+    TZ_C_LORD_HOWE,
+    TZ_C_LOS_ANGELES,
+    TZ_C_MADRID,
+    TZ_C_MAKASSAR,
+    TZ_C_MANAUS,
+    TZ_C_MANILA,
+    TZ_C_MARQUESAS,
+    TZ_C_MELBOURNE,
+    TZ_C_MEXICO_CITY,
+    TZ_C_MILAN,
+    TZ_C_MINSK,
+    TZ_C_MONTEVIDEO,
+    TZ_C_MOSCOW,
+    TZ_C_MUMBAI,
+    TZ_C_NAIROBI,
+    TZ_C_NEW_YORK,
+    TZ_C_NICOSIA,
+    TZ_C_NOUMEA,
+    TZ_C_NUUK,
+    TZ_C_OSLO,
+    TZ_C_PARIS,
+    TZ_C_PANAMA,
+    TZ_C_PERTH,
+    TZ_C_PHNOM_PENH,
+    TZ_C_PHOENIX,
+    TZ_C_PORT_LOUIS,
+    TZ_C_PORT_MORESBY,
+    TZ_C_PRAGUE,
+    TZ_C_PUNTA_ARENAS,
+    TZ_C_QUITO,
+    TZ_C_RIYADH,
+    TZ_C_RIO_DE_JANEIRO,
+    TZ_C_RECIFE,
+    TZ_C_RIGA,
+    TZ_C_ROME,
+    TZ_C_RIO_BRANCO,
+    TZ_C_SAN_JUAN,
+    TZ_C_SANTIAGO,
+    TZ_C_SAO_PAULO,
+    TZ_C_SARAJEVO,
+    TZ_C_SEOUL,
+    TZ_C_SHANGHAI,
+    TZ_C_SINGAPORE,
+    TZ_C_SKOPJE,
+    TZ_C_SOFIA,
+    TZ_C_ST_JOHNS,
+    TZ_C_STANLEY,
+    TZ_C_STOCKHOLM,
+    TZ_C_SYDNEY,
+    TZ_C_TAIPEI,
+    TZ_C_TAHITI,
+    TZ_C_TBILISI,
+    TZ_C_TEL_AVIV,
+    TZ_C_TEHRAN,
+    TZ_C_TOKYO,
+    TZ_C_TORONTO,
+    TZ_C_TUNIS,
+    TZ_C_ULAANBAATAR,
+    TZ_C_URUMQI,
+    TZ_C_VANCOUVER,
+    TZ_C_VICTORIA,
+    TZ_C_VIENNA,
+    TZ_C_VIENTIANE,
+    TZ_C_VILNIUS,
+    TZ_C_VLADIVOSTOK,
+    TZ_C_WELLINGTON,
+    TZ_C_WINDHOEK,
+    TZ_C_WARSAW,
+    TZ_C_WINNIPEG,
+    TZ_C_YANGON,
+    TZ_C_YEREVAN,
+    TZ_C_ZAGREB,
+    TZ_C_ZURICH,
+    TZ_C_GUATEMALA
+} tz_city_id_t;
+
+static const char *const s_tz_city_names[] = {
+    [TZ_C_ACC_RA] = "Accra",
+    [TZ_C_ADDIS_ABABA] = "Addis Ababa",
+    [TZ_C_ADELAIDE] = "Adelaide",
+    [TZ_C_AQTAU] = "Aqtau",
+    [TZ_C_ALGIERS] = "Algiers",
+    [TZ_C_ALMATY] = "Almaty",
+    [TZ_C_AMSTERDAM] = "Amsterdam",
+    [TZ_C_ANCHORAGE] = "Anchorage",
+    [TZ_C_ASUNCION] = "Asuncion",
+    [TZ_C_ASTANA] = "Astana",
+    [TZ_C_ATHENS] = "Athens",
+    [TZ_C_AUCKLAND] = "Auckland",
+    [TZ_C_AZORES] = "Azores",
+    [TZ_C_BAGHDAD] = "Baghdad",
+    [TZ_C_BAKU] = "Baku",
+    [TZ_C_BALI] = "Bali",
+    [TZ_C_BANGKOK] = "Bangkok",
+    [TZ_C_BEIJING] = "Beijing",
+    [TZ_C_BELGRADE] = "Belgrade",
+    [TZ_C_BERLIN] = "Berlin",
+    [TZ_C_BOGOTA] = "Bogota",
+    [TZ_C_BRATISLAVA] = "Bratislava",
+    [TZ_C_BRISBANE] = "Brisbane",
+    [TZ_C_BRUSSELS] = "Brussels",
+    [TZ_C_BUCHAREST] = "Bucharest",
+    [TZ_C_BUENOS_AIRES] = "Buenos Aires",
+    [TZ_C_BUDAPEST] = "Budapest",
+    [TZ_C_CAIRO] = "Cairo",
+    [TZ_C_CALGARY] = "Calgary",
+    [TZ_C_CANARY] = "Canary",
+    [TZ_C_CAPE_VERDE] = "Cape Verde",
+    [TZ_C_CARACAS] = "Caracas",
+    [TZ_C_CASABLANCA] = "Casablanca",
+    [TZ_C_CHICAGO] = "Chicago",
+    [TZ_C_COLOMBO] = "Colombo",
+    [TZ_C_COPENHAGEN] = "Copenhagen",
+    [TZ_C_DAKAR] = "Dakar",
+    [TZ_C_DALLAS] = "Dallas",
+    [TZ_C_DARWIN] = "Darwin",
+    [TZ_C_DENVER] = "Denver",
+    [TZ_C_DOHA] = "Doha",
+    [TZ_C_DUBAI] = "Dubai",
+    [TZ_C_DHAKA] = "Dhaka",
+    [TZ_C_DUBLIN] = "Dublin",
+    [TZ_C_FIJI] = "Fiji",
+    [TZ_C_FORTALEZA] = "Fortaleza",
+    [TZ_C_GUAYAQUIL] = "Guayaquil",
+    [TZ_C_HALIFAX] = "Halifax",
+    [TZ_C_HAVANA] = "Havana",
+    [TZ_C_HELSINKI] = "Helsinki",
+    [TZ_C_HOBART] = "Hobart",
+    [TZ_C_HONG_KONG] = "Hong Kong",
+    [TZ_C_HONOLULU] = "Honolulu",
+    [TZ_C_HO_CHI_MINH] = "Ho Chi Minh",
+    [TZ_C_ICELAND] = "Iceland",
+    [TZ_C_ISTANBUL] = "Istanbul",
+    [TZ_C_JAKARTA] = "Jakarta",
+    [TZ_C_JAMAICA] = "Jamaica",
+    [TZ_C_JAYAPURA] = "Jayapura",
+    [TZ_C_JOHANNESBURG] = "Johannesburg",
+    [TZ_C_KARACHI] = "Karachi",
+    [TZ_C_KATHMANDU] = "Kathmandu",
+    [TZ_C_KIEV] = "Kyiv",
+    [TZ_C_KUALA_LUMPUR] = "Kuala Lumpur",
+    [TZ_C_KOLKATA] = "Kolkata",
+    [TZ_C_KUWAIT] = "Kuwait",
+    [TZ_C_LAGOS] = "Lagos",
+    [TZ_C_LA_PAZ] = "La Paz",
+    [TZ_C_LIMA] = "Lima",
+    [TZ_C_LISBON] = "Lisbon",
+    [TZ_C_LJUBLJANA] = "Ljubljana",
+    [TZ_C_LONDON] = "London",
+    [TZ_C_LORD_HOWE] = "Lord Howe",
+    [TZ_C_LOS_ANGELES] = "Los Angeles",
+    [TZ_C_MADRID] = "Madrid",
+    [TZ_C_MAKASSAR] = "Makassar",
+    [TZ_C_MANAUS] = "Manaus",
+    [TZ_C_MANILA] = "Manila",
+    [TZ_C_MARQUESAS] = "Marquesas",
+    [TZ_C_MELBOURNE] = "Melbourne",
+    [TZ_C_MEXICO_CITY] = "Mexico City",
+    [TZ_C_MILAN] = "Milan",
+    [TZ_C_MINSK] = "Minsk",
+    [TZ_C_MONTEVIDEO] = "Montevideo",
+    [TZ_C_MOSCOW] = "Moscow",
+    [TZ_C_MUMBAI] = "Mumbai",
+    [TZ_C_NAIROBI] = "Nairobi",
+    [TZ_C_NEW_YORK] = "New York",
+    [TZ_C_NICOSIA] = "Nicosia",
+    [TZ_C_NOUMEA] = "Noumea",
+    [TZ_C_NUUK] = "Nuuk",
+    [TZ_C_OSLO] = "Oslo",
+    [TZ_C_PARIS] = "Paris",
+    [TZ_C_PANAMA] = "Panama",
+    [TZ_C_PERTH] = "Perth",
+    [TZ_C_PHNOM_PENH] = "Phnom Penh",
+    [TZ_C_PHOENIX] = "Phoenix",
+    [TZ_C_PORT_LOUIS] = "Port Louis",
+    [TZ_C_PORT_MORESBY] = "Port Moresby",
+    [TZ_C_PRAGUE] = "Prague",
+    [TZ_C_PUNTA_ARENAS] = "Punta Arenas",
+    [TZ_C_QUITO] = "Quito",
+    [TZ_C_RIYADH] = "Riyadh",
+    [TZ_C_RIO_DE_JANEIRO] = "Rio de Janeiro",
+    [TZ_C_RECIFE] = "Recife",
+    [TZ_C_ROME] = "Rome",
+    [TZ_C_RIGA] = "Riga",
+    [TZ_C_RIO_BRANCO] = "Rio Branco",
+    [TZ_C_SAN_JUAN] = "San Juan",
+    [TZ_C_SANTIAGO] = "Santiago",
+    [TZ_C_SAO_PAULO] = "Sao Paulo",
+    [TZ_C_SARAJEVO] = "Sarajevo",
+    [TZ_C_SEOUL] = "Seoul",
+    [TZ_C_SHANGHAI] = "Shanghai",
+    [TZ_C_SINGAPORE] = "Singapore",
+    [TZ_C_SKOPJE] = "Skopje",
+    [TZ_C_SOFIA] = "Sofia",
+    [TZ_C_ST_JOHNS] = "St Johns",
+    [TZ_C_STANLEY] = "Stanley",
+    [TZ_C_STOCKHOLM] = "Stockholm",
+    [TZ_C_SYDNEY] = "Sydney",
+    [TZ_C_TAIPEI] = "Taipei",
+    [TZ_C_TAHITI] = "Tahiti",
+    [TZ_C_TBILISI] = "Tbilisi",
+    [TZ_C_TEL_AVIV] = "Tel Aviv",
+    [TZ_C_TEHRAN] = "Tehran",
+    [TZ_C_TOKYO] = "Tokyo",
+    [TZ_C_TORONTO] = "Toronto",
+    [TZ_C_TUNIS] = "Tunis",
+    [TZ_C_ULAANBAATAR] = "Ulaanbaatar",
+    [TZ_C_URUMQI] = "Urumqi",
+    [TZ_C_VANCOUVER] = "Vancouver",
+    [TZ_C_VICTORIA] = "Victoria",
+    [TZ_C_VIENNA] = "Vienna",
+    [TZ_C_VIENTIANE] = "Vientiane",
+    [TZ_C_VILNIUS] = "Vilnius",
+    [TZ_C_VLADIVOSTOK] = "Vladivostok",
+    [TZ_C_WELLINGTON] = "Wellington",
+    [TZ_C_WINDHOEK] = "Windhoek",
+    [TZ_C_WARSAW] = "Warsaw",
+    [TZ_C_WINNIPEG] = "Winnipeg",
+    [TZ_C_YANGON] = "Yangon",
+    [TZ_C_YEREVAN] = "Yerevan",
+    [TZ_C_ZAGREB] = "Zagreb",
+    [TZ_C_ZURICH] = "Zurich",
+    [TZ_C_GUATEMALA] = "Guatemala",
+};
+
+typedef struct
+{
+    tz_zone_id_t zone;
+    uint8_t city;
+    tz_posix_id_t posix;
+} tz_entry_t;
+
+#define TZROW(zone, city, posix) { zone, city, posix }
+
+// Not const: sorted in place, once, the first time build_time_zone_screen()
+// runs (see its qsort() call) so region/city lists read alphabetically
+// instead of in this table's ad-hoc insertion order.
+static tz_entry_t s_timezones[] = {
+    // UTC / Atlantic
+    TZROW(TZ_ZONE_EUROPE, TZ_C_LONDON, TZ_P_GMT_BST),
+    TZROW(TZ_ZONE_EUROPE, TZ_C_DUBLIN, TZ_P_GMT_BST),
+    TZROW(TZ_ZONE_EUROPE, TZ_C_LISBON, TZ_P_WET_WEST),
+    TZROW(TZ_ZONE_ATLANTIC, TZ_C_CANARY, TZ_P_WET_WEST),
+    TZROW(TZ_ZONE_ATLANTIC, TZ_C_AZORES, TZ_P_AZOT),
+    TZROW(TZ_ZONE_ATLANTIC, TZ_C_ICELAND, TZ_P_GMT_NO_DST),
+    TZROW(TZ_ZONE_ATLANTIC, TZ_C_CAPE_VERDE, TZ_P_CVT),
+
+    // Europe (CET/EET/others)
+    TZROW(TZ_ZONE_EUROPE, TZ_C_MADRID, TZ_P_CET_CEST),
+    TZROW(TZ_ZONE_EUROPE, TZ_C_PARIS, TZ_P_CET_CEST),
+    TZROW(TZ_ZONE_EUROPE, TZ_C_BERLIN, TZ_P_CET_CEST),
+    TZROW(TZ_ZONE_EUROPE, TZ_C_VIENNA, TZ_P_CET_CEST),
+    TZROW(TZ_ZONE_EUROPE, TZ_C_ROME, TZ_P_CET_CEST),
+    TZROW(TZ_ZONE_EUROPE, TZ_C_MILAN, TZ_P_CET_CEST),
+    TZROW(TZ_ZONE_EUROPE, TZ_C_AMSTERDAM, TZ_P_CET_CEST),
+    TZROW(TZ_ZONE_EUROPE, TZ_C_BRUSSELS, TZ_P_CET_CEST),
+    TZROW(TZ_ZONE_EUROPE, TZ_C_ZURICH, TZ_P_CET_CEST),
+    TZROW(TZ_ZONE_EUROPE, TZ_C_STOCKHOLM, TZ_P_CET_CEST),
+    TZROW(TZ_ZONE_EUROPE, TZ_C_OSLO, TZ_P_CET_CEST),
+    TZROW(TZ_ZONE_EUROPE, TZ_C_COPENHAGEN, TZ_P_CET_CEST),
+    TZROW(TZ_ZONE_EUROPE, TZ_C_WARSAW, TZ_P_CET_CEST),
+    TZROW(TZ_ZONE_EUROPE, TZ_C_PRAGUE, TZ_P_CET_CEST),
+    TZROW(TZ_ZONE_EUROPE, TZ_C_BRATISLAVA, TZ_P_CET_CEST),
+    TZROW(TZ_ZONE_EUROPE, TZ_C_BUDAPEST, TZ_P_CET_CEST),
+    TZROW(TZ_ZONE_EUROPE, TZ_C_ZAGREB, TZ_P_CET_CEST),
+    TZROW(TZ_ZONE_EUROPE, TZ_C_BELGRADE, TZ_P_CET_CEST),
+    TZROW(TZ_ZONE_EUROPE, TZ_C_LJUBLJANA, TZ_P_CET_CEST),
+    TZROW(TZ_ZONE_EUROPE, TZ_C_SARAJEVO, TZ_P_CET_CEST),
+    TZROW(TZ_ZONE_EUROPE, TZ_C_SKOPJE, TZ_P_CET_CEST),
+    TZROW(TZ_ZONE_EUROPE, TZ_C_KIEV, TZ_P_EET_EEST),
+    TZROW(TZ_ZONE_EUROPE, TZ_C_ATHENS, TZ_P_EET_EEST),
+    TZROW(TZ_ZONE_EUROPE, TZ_C_BUCHAREST, TZ_P_EET_EEST),
+    TZROW(TZ_ZONE_EUROPE, TZ_C_SOFIA, TZ_P_EET_EEST),
+    TZROW(TZ_ZONE_EUROPE, TZ_C_HELSINKI, TZ_P_EET_EEST),
+    TZROW(TZ_ZONE_EUROPE, TZ_C_RIGA, TZ_P_EET_EEST),
+    TZROW(TZ_ZONE_EUROPE, TZ_C_VILNIUS, TZ_P_EET_EEST),
+    TZROW(TZ_ZONE_ASIA, TZ_C_NICOSIA, TZ_P_EET_EEST),
+    TZROW(TZ_ZONE_EUROPE, TZ_C_ISTANBUL, TZ_P_TRT),
+    TZROW(TZ_ZONE_ASIA, TZ_C_TEL_AVIV, TZ_P_IST_IDT),
+    TZROW(TZ_ZONE_EUROPE, TZ_C_MOSCOW, TZ_P_MSK),
+    TZROW(TZ_ZONE_EUROPE, TZ_C_MINSK, TZ_P_MSK),
+    TZROW(TZ_ZONE_ASIA, TZ_C_TBILISI, TZ_P_GET),
+    TZROW(TZ_ZONE_ASIA, TZ_C_YEREVAN, TZ_P_AMT_ARM),
+    TZROW(TZ_ZONE_ASIA, TZ_C_BAKU, TZ_P_AZT),
+
+    // Middle East / Africa
+    TZROW(TZ_ZONE_ASIA, TZ_C_RIYADH, TZ_P_AST3),
+    TZROW(TZ_ZONE_ASIA, TZ_C_DOHA, TZ_P_AST3),
+    TZROW(TZ_ZONE_ASIA, TZ_C_DUBAI, TZ_P_GST4),
+    TZROW(TZ_ZONE_ASIA, TZ_C_KUWAIT, TZ_P_AST3),
+    TZROW(TZ_ZONE_ASIA, TZ_C_BAGHDAD, TZ_P_AST3),
+    TZROW(TZ_ZONE_ASIA, TZ_C_TEHRAN, TZ_P_IRST),
+    TZROW(TZ_ZONE_AFRICA, TZ_C_CAIRO, TZ_P_EET_NO_DST),
+    TZROW(TZ_ZONE_AFRICA, TZ_C_JOHANNESBURG, TZ_P_SAST),
+    TZROW(TZ_ZONE_AFRICA, TZ_C_WINDHOEK, TZ_P_CAT),
+    TZROW(TZ_ZONE_AFRICA, TZ_C_NAIROBI, TZ_P_EAT),
+    TZROW(TZ_ZONE_AFRICA, TZ_C_ADDIS_ABABA, TZ_P_EAT),
+    TZROW(TZ_ZONE_AFRICA, TZ_C_CASABLANCA, TZ_P_WET_WEST),
+    TZROW(TZ_ZONE_AFRICA, TZ_C_ALGIERS, TZ_P_CET_NO_DST),
+    TZROW(TZ_ZONE_AFRICA, TZ_C_TUNIS, TZ_P_CET_NO_DST),
+    TZROW(TZ_ZONE_AFRICA, TZ_C_LAGOS, TZ_P_WAT),
+    TZROW(TZ_ZONE_AFRICA, TZ_C_DAKAR, TZ_P_GMT_NO_DST),
+    TZROW(TZ_ZONE_INDIAN, TZ_C_PORT_LOUIS, TZ_P_MUT),
+    TZROW(TZ_ZONE_INDIAN, TZ_C_VICTORIA, TZ_P_SCT),
+
+    // South Asia / Central Asia
+    TZROW(TZ_ZONE_ASIA, TZ_C_KARACHI, TZ_P_PKT),
+    TZROW(TZ_ZONE_ASIA, TZ_C_KOLKATA, TZ_P_IST_INDIA),
+    TZROW(TZ_ZONE_ASIA, TZ_C_MUMBAI, TZ_P_IST_INDIA),
+    TZROW(TZ_ZONE_ASIA, TZ_C_COLOMBO, TZ_P_SLST),
+    TZROW(TZ_ZONE_ASIA, TZ_C_KATHMANDU, TZ_P_NPT),
+    TZROW(TZ_ZONE_ASIA, TZ_C_DHAKA, TZ_P_BDT),
+    TZROW(TZ_ZONE_ASIA, TZ_C_YANGON, TZ_P_MMT),
+    TZROW(TZ_ZONE_ASIA, TZ_C_AQTAU, TZ_P_AQTT),
+    TZROW(TZ_ZONE_ASIA, TZ_C_ASTANA, TZ_P_ALMT),
+    TZROW(TZ_ZONE_ASIA, TZ_C_ALMATY, TZ_P_ALMT),
+    TZROW(TZ_ZONE_ASIA, TZ_C_URUMQI, TZ_P_XJT),
+
+    // Southeast / East Asia
+    TZROW(TZ_ZONE_ASIA, TZ_C_BANGKOK, TZ_P_ICT),
+    TZROW(TZ_ZONE_ASIA, TZ_C_HO_CHI_MINH, TZ_P_ICT),
+    TZROW(TZ_ZONE_ASIA, TZ_C_PHNOM_PENH, TZ_P_ICT),
+    TZROW(TZ_ZONE_ASIA, TZ_C_VIENTIANE, TZ_P_ICT),
+    TZROW(TZ_ZONE_ASIA, TZ_C_JAKARTA, TZ_P_WIB),
+    TZROW(TZ_ZONE_ASIA, TZ_C_BALI, TZ_P_WITA),
+    TZROW(TZ_ZONE_ASIA, TZ_C_MAKASSAR, TZ_P_WITA),
+    TZROW(TZ_ZONE_ASIA, TZ_C_JAYAPURA, TZ_P_WIT),
+    TZROW(TZ_ZONE_ASIA, TZ_C_BEIJING, TZ_P_CST_CHINA),
+    TZROW(TZ_ZONE_ASIA, TZ_C_SHANGHAI, TZ_P_CST_CHINA),
+    TZROW(TZ_ZONE_ASIA, TZ_C_HONG_KONG, TZ_P_HKT),
+    TZROW(TZ_ZONE_ASIA, TZ_C_TAIPEI, TZ_P_CST_CHINA),
+    TZROW(TZ_ZONE_ASIA, TZ_C_SINGAPORE, TZ_P_SGT),
+    TZROW(TZ_ZONE_ASIA, TZ_C_KUALA_LUMPUR, TZ_P_SGT),
+    TZROW(TZ_ZONE_ASIA, TZ_C_MANILA, TZ_P_PHT),
+    TZROW(TZ_ZONE_ASIA, TZ_C_TOKYO, TZ_P_JST),
+    TZROW(TZ_ZONE_ASIA, TZ_C_SEOUL, TZ_P_KST),
+    TZROW(TZ_ZONE_ASIA, TZ_C_ULAANBAATAR, TZ_P_ULAT),
+    TZROW(TZ_ZONE_ASIA, TZ_C_VLADIVOSTOK, TZ_P_VLAT),
+
+    // Oceania
+    TZROW(TZ_ZONE_AUSTRALIA, TZ_C_PERTH, TZ_P_AWST),
+    TZROW(TZ_ZONE_AUSTRALIA, TZ_C_DARWIN, TZ_P_ACST),
+    TZROW(TZ_ZONE_AUSTRALIA, TZ_C_ADELAIDE, TZ_P_ACST_ACDT),
+    TZROW(TZ_ZONE_AUSTRALIA, TZ_C_BRISBANE, TZ_P_AEST),
+    TZROW(TZ_ZONE_AUSTRALIA, TZ_C_SYDNEY, TZ_P_AEST_AEDT),
+    TZROW(TZ_ZONE_AUSTRALIA, TZ_C_MELBOURNE, TZ_P_AEST_AEDT),
+    TZROW(TZ_ZONE_AUSTRALIA, TZ_C_HOBART, TZ_P_AEST_AEDT),
+    TZROW(TZ_ZONE_AUSTRALIA, TZ_C_LORD_HOWE, TZ_P_LHST),
+    TZROW(TZ_ZONE_PACIFIC, TZ_C_PORT_MORESBY, TZ_P_PGT),
+    TZROW(TZ_ZONE_PACIFIC, TZ_C_NOUMEA, TZ_P_NCT),
+    TZROW(TZ_ZONE_PACIFIC, TZ_C_AUCKLAND, TZ_P_NZST_NZDT),
+    TZROW(TZ_ZONE_PACIFIC, TZ_C_WELLINGTON, TZ_P_NZST_NZDT),
+    TZROW(TZ_ZONE_PACIFIC, TZ_C_FIJI, TZ_P_FJT),
+    TZROW(TZ_ZONE_PACIFIC, TZ_C_TAHITI, TZ_P_TAHT),
+    TZROW(TZ_ZONE_PACIFIC, TZ_C_MARQUESAS, TZ_P_MART),
+
+    // North America
+    TZROW(TZ_ZONE_AMERICA, TZ_C_ANCHORAGE, TZ_P_AKST_AKDT),
+    TZROW(TZ_ZONE_AMERICA, TZ_C_LOS_ANGELES, TZ_P_PST_PDT),
+    TZROW(TZ_ZONE_AMERICA, TZ_C_VANCOUVER, TZ_P_PST_PDT),
+    TZROW(TZ_ZONE_AMERICA, TZ_C_DENVER, TZ_P_MST_MDT),
+    TZROW(TZ_ZONE_AMERICA, TZ_C_CALGARY, TZ_P_MST_MDT),
+    TZROW(TZ_ZONE_AMERICA, TZ_C_PHOENIX, TZ_P_MST_NO_DST),
+    TZROW(TZ_ZONE_AMERICA, TZ_C_CHICAGO, TZ_P_CST_CDT),
+    TZROW(TZ_ZONE_AMERICA, TZ_C_DALLAS, TZ_P_CST_CDT),
+    TZROW(TZ_ZONE_AMERICA, TZ_C_WINNIPEG, TZ_P_CST_CDT),
+    TZROW(TZ_ZONE_AMERICA, TZ_C_MEXICO_CITY, TZ_P_CST_CDT_MX),
+    TZROW(TZ_ZONE_AMERICA, TZ_C_NEW_YORK, TZ_P_EST_EDT),
+    TZROW(TZ_ZONE_AMERICA, TZ_C_TORONTO, TZ_P_EST_EDT),
+    TZROW(TZ_ZONE_AMERICA, TZ_C_HALIFAX, TZ_P_AST_ADT),
+    TZROW(TZ_ZONE_AMERICA, TZ_C_ST_JOHNS, TZ_P_NST_NDT),
+    TZROW(TZ_ZONE_PACIFIC, TZ_C_HONOLULU, TZ_P_HST),
+    TZROW(TZ_ZONE_AMERICA, TZ_C_SAN_JUAN, TZ_P_AST_NO_DST),
+    TZROW(TZ_ZONE_AMERICA, TZ_C_HAVANA, TZ_P_CST5CDT_CUBA),
+
+    // Central / South America
+    TZROW(TZ_ZONE_AMERICA, TZ_C_GUATEMALA, TZ_P_CST6),
+    TZROW(TZ_ZONE_AMERICA, TZ_C_PANAMA, TZ_P_EST5),
+    TZROW(TZ_ZONE_AMERICA, TZ_C_JAMAICA, TZ_P_EST5),
+    TZROW(TZ_ZONE_AMERICA, TZ_C_BOGOTA, TZ_P_COT),
+    TZROW(TZ_ZONE_AMERICA, TZ_C_LIMA, TZ_P_PET),
+    TZROW(TZ_ZONE_AMERICA, TZ_C_QUITO, TZ_P_ECT),
+    TZROW(TZ_ZONE_AMERICA, TZ_C_CARACAS, TZ_P_VET),
+    TZROW(TZ_ZONE_AMERICA, TZ_C_LA_PAZ, TZ_P_BOT),
+    TZROW(TZ_ZONE_AMERICA, TZ_C_SANTIAGO, TZ_P_CLT_CLST),
+    TZROW(TZ_ZONE_AMERICA, TZ_C_ASUNCION, TZ_P_PYT_PYST),
+    TZROW(TZ_ZONE_AMERICA, TZ_C_BUENOS_AIRES, TZ_P_ART),
+    TZROW(TZ_ZONE_AMERICA, TZ_C_MONTEVIDEO, TZ_P_UYT),
+    TZROW(TZ_ZONE_AMERICA, TZ_C_SAO_PAULO, TZ_P_BRT),
+    TZROW(TZ_ZONE_AMERICA, TZ_C_RIO_DE_JANEIRO, TZ_P_BRT),
+    TZROW(TZ_ZONE_AMERICA, TZ_C_FORTALEZA, TZ_P_BRT),
+    TZROW(TZ_ZONE_AMERICA, TZ_C_RECIFE, TZ_P_BRT),
+    TZROW(TZ_ZONE_AMERICA, TZ_C_MANAUS, TZ_P_AMT4),
+    TZROW(TZ_ZONE_AMERICA, TZ_C_RIO_BRANCO, TZ_P_ACT5),
+    TZROW(TZ_ZONE_AMERICA, TZ_C_PUNTA_ARENAS, TZ_P_CLST3),
+    TZROW(TZ_ZONE_ATLANTIC, TZ_C_STANLEY, TZ_P_FKT3),
+    TZROW(TZ_ZONE_AMERICA, TZ_C_NUUK, TZ_P_WGT_WGST),
+};
+#define TZ_TABLE_COUNT (sizeof(s_timezones) / sizeof(s_timezones[0]))
+
+static int tz_compare(const void *a, const void *b)
+{
+    const tz_entry_t *ea = (const tz_entry_t *)a;
+    const tz_entry_t *eb = (const tz_entry_t *)b;
+    int c = strcmp(s_tz_zone_names[ea->zone], s_tz_zone_names[eb->zone]);
+    if (c != 0)
+    {
+        return c;
+    }
+    return strcmp(s_tz_city_names[ea->city], s_tz_city_names[eb->city]);
+}
+
+static size_t tz_count_in_zone(tz_zone_id_t zone)
+{
+    size_t count = 0;
+    for (size_t i = 0; i < TZ_TABLE_COUNT; i++)
+    {
+        if (s_timezones[i].zone == zone)
+        {
+            count++;
+        }
+    }
+    return count;
+}
+
+// Settings root's "Time" row description: the exact "Zone/City" the user
+// picked (see time_zone_city_row_click_cb()), or a short fallback when
+// nothing has been picked yet (e.g. the "UTC0" default, which has no city
+// entry of its own).
+static void tz_describe(const char *tz_label, const char *posix, char *out, size_t out_len)
+{
+    if (tz_label[0] != '\0')
+    {
+        snprintf(out, out_len, "%s", tz_label);
+        return;
+    }
+    if (strcmp(posix, "UTC0") == 0)
+    {
+        snprintf(out, out_len, "UTC");
+        return;
+    }
+    snprintf(out, out_len, "%s", posix);
+}
+
+// --- Settings > Time screens ---
+
+static void time_format_back_cb(lv_event_t *e)
+{
+    (void)e;
+    show_settings_view(SETTINGS_VIEW_LOCALE);
+}
+
+static void date_format_back_cb(lv_event_t *e)
+{
+    (void)e;
+    show_settings_view(SETTINGS_VIEW_LOCALE);
+}
+
+static void time_zone_region_back_cb(lv_event_t *e)
+{
+    (void)e;
+    show_settings_view(SETTINGS_VIEW_LOCALE);
+}
+
+static void time_zone_city_back_cb(lv_event_t *e)
+{
+    (void)e;
+    show_settings_view(SETTINGS_VIEW_TIME_ZONES);
+}
+
+// A selectable row whose checkmark is a fixed child created up front and
+// then just hidden/shown, rather than created/destroyed on selection - used
+// by the two fixed-length lists (Time format, Date format). out_check lets
+// the caller keep a handle to toggle it later.
+static lv_obj_t *build_time_toggle_row(lv_obj_t *parent, const char *title, lv_event_cb_t click_cb, void *user_data,
+                                        lv_obj_t **out_check)
+{
+    lv_obj_t *row = build_selectable_row(parent, title, false, click_cb, user_data);
+    lv_obj_t *check = lv_label_create(row);
+    lv_obj_set_style_text_color(check, COLOR_ACCENT, 0);
+    lv_label_set_text(check, LV_SYMBOL_OK);
+    lv_obj_add_flag(check, LV_OBJ_FLAG_HIDDEN);
+    if (out_check)
+    {
+        *out_check = check;
+    }
+    return row;
+}
+
+static void time_format_refresh_marks(void)
+{
+    if (s_locale.time_24h)
+    {
+        lv_obj_remove_flag(s_time_format_check_24h, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(s_time_format_check_12h, LV_OBJ_FLAG_HIDDEN);
+    }
+    else
+    {
+        lv_obj_remove_flag(s_time_format_check_12h, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(s_time_format_check_24h, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
+static void time_format_row_click_cb(lv_event_t *e)
+{
+    bool is_24h = (bool)(uintptr_t)lv_event_get_user_data(e);
+    s_locale.time_24h = is_24h;
     settings_store_save_locale(&s_locale);
+    time_format_refresh_marks();
+}
+
+static void build_time_format_screen(lv_obj_t *screen)
+{
+    lv_obj_t *body =
+        build_time_subscreen(screen, &s_time_format_screen, "Time format", NULL, NULL, time_format_back_cb);
+
+    build_time_toggle_row(body, "12-hour", time_format_row_click_cb, (void *)(uintptr_t)false,
+                           &s_time_format_check_12h);
+    build_time_toggle_row(body, "24-hour", time_format_row_click_cb, (void *)(uintptr_t)true,
+                           &s_time_format_check_24h);
+
+    time_format_refresh_marks();
+}
+
+static void date_format_row_click_cb(lv_event_t *e)
+{
+    size_t idx = (size_t)(uintptr_t)lv_event_get_user_data(e);
+    strncpy(s_locale.date_format, s_date_formats[idx].format, SETTINGS_DATE_FORMAT_MAX_LEN);
+    s_locale.date_format[SETTINGS_DATE_FORMAT_MAX_LEN] = '\0';
+    settings_store_save_locale(&s_locale);
+
+    for (size_t i = 0; i < DATE_FORMAT_COUNT; i++)
+    {
+        if (i == idx)
+        {
+            lv_obj_remove_flag(s_date_format_checks[i], LV_OBJ_FLAG_HIDDEN);
+        }
+        else
+        {
+            lv_obj_add_flag(s_date_format_checks[i], LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+}
+
+static void build_date_format_screen(lv_obj_t *screen)
+{
+    lv_obj_t *body =
+        build_time_subscreen(screen, &s_date_format_screen, "Date format", NULL, NULL, date_format_back_cb);
+
+    for (size_t i = 0; i < DATE_FORMAT_COUNT; i++)
+    {
+        build_time_toggle_row(body, s_date_formats[i].mask, date_format_row_click_cb, (void *)(uintptr_t)i,
+                               &s_date_format_checks[i]);
+    }
+
+    for (size_t i = 0; i < DATE_FORMAT_COUNT; i++)
+    {
+        if (strcmp(s_locale.date_format, s_date_formats[i].format) == 0)
+        {
+            lv_obj_remove_flag(s_date_format_checks[i], LV_OBJ_FLAG_HIDDEN);
+            break;
+        }
+    }
+}
+
+static void time_zone_city_row_click_cb(lv_event_t *e); // defined below, used by show_time_zone_cities()
+
+// Rebuilds the city list for one region from scratch - cheap enough to redo
+// on every tap (at most a few dozen rows) and far simpler than moving a
+// single checkmark between rows that get torn down and recreated anyway.
+static void show_time_zone_cities(tz_zone_id_t zone)
+{
+    lv_label_set_text(s_time_zone_city_subtitle, s_tz_zone_names[zone]);
+    lv_obj_clean(s_time_zone_city_list);
+
+    for (size_t i = 0; i < TZ_TABLE_COUNT; i++)
+    {
+        const tz_entry_t *entry = &s_timezones[i];
+        if (entry->zone != zone)
+        {
+            continue;
+        }
+        char title_buf[48];
+        snprintf(title_buf, sizeof(title_buf), "%s/%s", s_tz_zone_names[entry->zone], s_tz_city_names[entry->city]);
+        // Matched on the exact "Zone/City" label the user picked, not on
+        // posix_tz - several cities in a region can share one POSIX/DST
+        // rule (e.g. every CET/CEST city in Europe), which previously made
+        // every one of them light up as "current" at once.
+        bool is_current = strcmp(title_buf, s_locale.tz_label) == 0;
+        build_selectable_row(s_time_zone_city_list, title_buf, is_current, time_zone_city_row_click_cb,
+                              (void *)entry);
+    }
+}
+
+static void time_zone_city_row_click_cb(lv_event_t *e)
+{
+    const tz_entry_t *entry = (const tz_entry_t *)lv_event_get_user_data(e);
+    if (!entry)
+    {
+        return;
+    }
+    const char *posix = s_tz_posix_strings[entry->posix];
+
+    strncpy(s_locale.posix_tz, posix, SETTINGS_POSIX_TZ_MAX_LEN);
+    s_locale.posix_tz[SETTINGS_POSIX_TZ_MAX_LEN] = '\0';
+    snprintf(s_locale.tz_label, sizeof(s_locale.tz_label), "%s/%s", s_tz_zone_names[entry->zone],
+             s_tz_city_names[entry->city]);
+    settings_store_save_locale(&s_locale);
+
+    // Applied immediately, not just on next boot.
+    setenv("TZ", posix, 1);
+    tzset();
+
+    show_time_zone_cities(entry->zone); // rebuild to move the checkmark
+}
+
+static void time_zone_region_row_click_cb(lv_event_t *e)
+{
+    tz_zone_id_t zone = (tz_zone_id_t)(uintptr_t)lv_event_get_user_data(e);
+    show_time_zone_cities(zone);
+    show_settings_view(SETTINGS_VIEW_TIME_ZONE_CITIES);
+}
+
+static void build_time_zone_screen(lv_obj_t *screen)
+{
+    lv_obj_t *body =
+        build_time_subscreen(screen, &s_time_zone_screen, "Time zones", NULL, NULL, time_zone_region_back_cb);
+
+    // Alphabetizes both the region list below and every per-region city
+    // list built later by show_time_zone_cities() (see tz_compare()). Only
+    // needs to run once - this function itself only runs once, at startup.
+    qsort(s_timezones, TZ_TABLE_COUNT, sizeof(s_timezones[0]), tz_compare);
+
+    for (tz_zone_id_t zone = TZ_ZONE_AMERICA; zone < TZ_ZONE_COUNT; zone++)
+    {
+        if (tz_count_in_zone(zone) == 0)
+        {
+            continue;
+        }
+        build_nav_row(body, s_tz_zone_names[zone], time_zone_region_row_click_cb, (void *)(uintptr_t)zone);
+    }
+}
+
+static void build_time_zone_city_screen(lv_obj_t *screen)
+{
+    s_time_zone_city_list = build_time_subscreen(screen, &s_time_zone_city_screen, "Time zones", "",
+                                                  &s_time_zone_city_subtitle, time_zone_city_back_cb);
+}
+
+static void time_format_nav_row_click_cb(lv_event_t *e)
+{
+    (void)e;
+    show_settings_view(SETTINGS_VIEW_TIME_FORMAT);
+}
+
+static void date_format_nav_row_click_cb(lv_event_t *e)
+{
+    (void)e;
+    show_settings_view(SETTINGS_VIEW_DATE_FORMAT);
+}
+
+static void time_zones_nav_row_click_cb(lv_event_t *e)
+{
+    (void)e;
+    show_settings_view(SETTINGS_VIEW_TIME_ZONES);
 }
 
 static void build_locale_screen(lv_obj_t *screen)
@@ -2981,34 +4113,11 @@ static void build_locale_screen(lv_obj_t *screen)
     lv_obj_set_size(s_locale_screen, LV_PCT(100), BOARD_JC4880P443C_LCD_V_RES - STATUSBAR_HEIGHT_PX);
     lv_obj_set_flex_flow(s_locale_screen, LV_FLEX_FLOW_COLUMN);
 
-    build_subscreen_header(s_locale_screen, "Date & time", NULL, settings_back_cb);
+    build_subscreen_header(s_locale_screen, "Time", NULL, settings_back_cb);
 
-    lv_obj_t *toggle_row = lv_obj_create(s_locale_screen);
-    lv_obj_remove_style_all(toggle_row);
-    make_plain_container(toggle_row);
-    lv_obj_set_size(toggle_row, LV_PCT(100), SETTINGS_ROW_HEIGHT_PX);
-    lv_obj_set_flex_flow(toggle_row, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(toggle_row, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_left(toggle_row, 20, 0);
-    lv_obj_set_style_pad_right(toggle_row, 20, 0);
-    lv_obj_set_style_border_side(toggle_row, LV_BORDER_SIDE_BOTTOM, 0);
-    lv_obj_set_style_border_width(toggle_row, 1, 0);
-    lv_obj_set_style_border_color(toggle_row, COLOR_HAIRLINE, 0);
-
-    lv_obj_t *toggle_label = lv_label_create(toggle_row);
-    lv_obj_set_style_text_color(toggle_label, COLOR_TEXT, 0);
-    lv_obj_set_style_text_font(toggle_label, &lv_font_montserrat_16, 0);
-    lv_label_set_text(toggle_label, "24-hour clock");
-
-    lv_obj_t *toggle = lv_switch_create(toggle_row);
-    style_dark_switch(toggle);
-    if (s_locale.time_24h)
-    {
-        lv_obj_add_state(toggle, LV_STATE_CHECKED);
-    }
-    lv_obj_add_event_cb(toggle, locale_24h_toggle_cb, LV_EVENT_VALUE_CHANGED, NULL);
-    // Time zone editing (raw POSIX TZ string) removed for now - revisiting
-    // the approach later; the switch above is all this screen does today.
+    build_nav_row(s_locale_screen, "Time format", time_format_nav_row_click_cb, NULL);
+    build_nav_row(s_locale_screen, "Date format", date_format_nav_row_click_cb, NULL);
+    build_nav_row(s_locale_screen, "Time zones", time_zones_nav_row_click_cb, NULL);
 }
 
 static void display_ui_render(void)
@@ -3023,10 +4132,14 @@ static void display_ui_render(void)
     lv_obj_set_size(s_rows_container, LV_PCT(100), BOARD_JC4880P443C_LCD_V_RES - STATUSBAR_HEIGHT_PX);
     lv_obj_set_flex_flow(s_rows_container, LV_FLEX_FLOW_COLUMN);
 
-    settings_store_load_locale(&s_locale); // build_locale_screen() below needs it for the 24h switch's initial state
+    settings_store_load_locale(&s_locale); // the Time screens below need it for their initial checkmarks
 
     build_settings_list(screen);
     build_locale_screen(screen);
+    build_time_format_screen(screen);
+    build_date_format_screen(screen);
+    build_time_zone_screen(screen);
+    build_time_zone_city_screen(screen);
     build_wifi_screen(screen);
     build_wifi_password_screen(screen);
     build_watchlist_manage_screen(screen);
@@ -3140,6 +4253,44 @@ static int cmd_nav(int argc, char **argv)
         lv_keyboard_set_textarea(s_watchlist_add_keyboard, s_watchlist_symbol_input);
         lv_obj_remove_flag(s_watchlist_add_keyboard, LV_OBJ_FLAG_HIDDEN);
     }
+    else if (strcmp(target, "time") == 0)
+    {
+        set_active_screen(DISPLAY_UI_SCREEN_SETTINGS);
+        show_settings_view(SETTINGS_VIEW_LOCALE);
+    }
+    else if (strcmp(target, "time_format") == 0)
+    {
+        set_active_screen(DISPLAY_UI_SCREEN_SETTINGS);
+        show_settings_view(SETTINGS_VIEW_TIME_FORMAT);
+    }
+    else if (strcmp(target, "date_format") == 0)
+    {
+        set_active_screen(DISPLAY_UI_SCREEN_SETTINGS);
+        show_settings_view(SETTINGS_VIEW_DATE_FORMAT);
+    }
+    else if (strcmp(target, "time_zones") == 0)
+    {
+        set_active_screen(DISPLAY_UI_SCREEN_SETTINGS);
+        show_settings_view(SETTINGS_VIEW_TIME_ZONES);
+    }
+    else if (strcmp(target, "time_zone_cities") == 0)
+    {
+        set_active_screen(DISPLAY_UI_SCREEN_SETTINGS);
+        // argv[2] is a zone name (e.g. "Europe") - defaults to Europe (the
+        // largest region) since that's the most useful case to inspect.
+        const char *zone_name = (argc >= 3) ? argv[2] : "Europe";
+        tz_zone_id_t zone = TZ_ZONE_EUROPE;
+        for (size_t i = 0; i < TZ_ZONE_COUNT; i++)
+        {
+            if (strcmp(s_tz_zone_names[i], zone_name) == 0)
+            {
+                zone = (tz_zone_id_t)i;
+                break;
+            }
+        }
+        show_time_zone_cities(zone);
+        show_settings_view(SETTINGS_VIEW_TIME_ZONE_CITIES);
+    }
     else
     {
         board_jc4880p443c_display_unlock();
@@ -3157,7 +4308,8 @@ esp_err_t display_ui_register_dev_nav_console(void)
     const esp_console_cmd_t nav_cmd = {
         .command = "nav",
         .help = "Jump directly to a screen: watchlist | settings | wifi | wifi_password [ssid] | "
-                "watchlist_manage | watchlist_add (dev builds only)",
+                "watchlist_manage | watchlist_add | time | time_format | date_format | time_zones | "
+                "time_zone_cities [zone] (dev builds only)",
         .hint = NULL,
         .func = &cmd_nav,
     };

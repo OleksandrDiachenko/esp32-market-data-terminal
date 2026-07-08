@@ -6,12 +6,16 @@ static void test_roundtrip(void)
     locale_settings_t cfg;
     settings_locale_init_default(&cfg);
     strncpy(cfg.posix_tz, "EST5EDT,M3.2.0,M11.1.0", SETTINGS_POSIX_TZ_MAX_LEN);
+    strncpy(cfg.date_format, "%Y-%m-%d", SETTINGS_DATE_FORMAT_MAX_LEN);
+    strncpy(cfg.tz_label, "America/New York", SETTINGS_TZ_LABEL_MAX_LEN);
     cfg.time_24h = false;
 
     settings_locale_seal(&cfg);
 
     CHECK(settings_locale_validate(&cfg) == SETTINGS_CODEC_OK);
     CHECK_STREQ(cfg.posix_tz, "EST5EDT,M3.2.0,M11.1.0");
+    CHECK_STREQ(cfg.date_format, "%Y-%m-%d");
+    CHECK_STREQ(cfg.tz_label, "America/New York");
 }
 
 static void test_bad_crc_rejected(void)

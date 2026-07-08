@@ -106,6 +106,7 @@ void settings_locale_init_default(locale_settings_t *out)
     out->magic = SETTINGS_LOCALE_MAGIC;
     out->version = SETTINGS_LOCALE_VERSION;
     strncpy(out->posix_tz, "UTC0", SETTINGS_POSIX_TZ_MAX_LEN);
+    strncpy(out->date_format, "%a %d %b", SETTINGS_DATE_FORMAT_MAX_LEN);
     out->time_24h = true;
 }
 
@@ -154,6 +155,8 @@ settings_codec_status_t settings_symbols_validate(const symbol_settings_t *db)
 void settings_locale_seal(locale_settings_t *db)
 {
     db->posix_tz[SETTINGS_POSIX_TZ_MAX_LEN] = '\0';
+    db->date_format[SETTINGS_DATE_FORMAT_MAX_LEN] = '\0';
+    db->tz_label[SETTINGS_TZ_LABEL_MAX_LEN] = '\0';
     settings_codec_seal(db, sizeof(*db), offsetof(locale_settings_t, crc32), SETTINGS_LOCALE_MAGIC,
                          SETTINGS_LOCALE_VERSION);
 }

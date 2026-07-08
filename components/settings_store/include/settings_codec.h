@@ -25,8 +25,10 @@ extern "C" {
 #define SETTINGS_MAX_WATCHLIST 10 // bumped from 8 - see docs/decisions/0007-watchlist-management.md
 
 #define SETTINGS_LOCALE_MAGIC 0x534c4f43u // 'SLOC'
-#define SETTINGS_LOCALE_VERSION 1u
+#define SETTINGS_LOCALE_VERSION 3u // bumped: added tz_label (Settings > Time > Time zones)
 #define SETTINGS_POSIX_TZ_MAX_LEN 47 // e.g. "AEST-10AEDT,M10.1.0,M4.1.0/3"
+#define SETTINGS_DATE_FORMAT_MAX_LEN 15 // e.g. "%b %d, %Y" - longest of the built-in date format options
+#define SETTINGS_TZ_LABEL_MAX_LEN 31 // "Zone/City", e.g. "America/Buenos Aires"
 
 #define SETTINGS_API_REGION_MAGIC 0x53415247u // 'SARG'
 #define SETTINGS_API_REGION_VERSION 1u
@@ -65,6 +67,12 @@ typedef struct
     uint16_t reserved;
     uint32_t crc32;
     char posix_tz[SETTINGS_POSIX_TZ_MAX_LEN + 1];
+    char date_format[SETTINGS_DATE_FORMAT_MAX_LEN + 1]; // strftime() pattern, e.g. "%d %b %Y"
+    // "Zone/City" label for the exact Time zones selection, e.g.
+    // "Europe/Kyiv" - several cities can share one posix_tz DST rule (every
+    // CET/CEST city in Europe, for instance), so posix_tz alone can't tell
+    // which one the user actually picked. Empty until a selection is made.
+    char tz_label[SETTINGS_TZ_LABEL_MAX_LEN + 1];
     bool time_24h;
     uint8_t reserved2[3];
 } locale_settings_t;
