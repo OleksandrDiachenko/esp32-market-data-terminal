@@ -563,6 +563,10 @@ static void set_active_screen(display_ui_screen_t screen)
 static void nav_click_cb(lv_event_t *e)
 {
     (void)e;
+    if (s_active_screen == DISPLAY_UI_SCREEN_SETTINGS && s_settings_view == SETTINGS_VIEW_WIFI)
+    {
+        wifi_manager_resume_autoconnect();
+    }
     set_active_screen(s_active_screen == DISPLAY_UI_SCREEN_WATCHLIST ? DISPLAY_UI_SCREEN_SETTINGS
                                                                       : DISPLAY_UI_SCREEN_WATCHLIST);
 }
@@ -570,6 +574,10 @@ static void nav_click_cb(lv_event_t *e)
 static void settings_back_cb(lv_event_t *e)
 {
     (void)e;
+    if (s_settings_view == SETTINGS_VIEW_WIFI)
+    {
+        wifi_manager_resume_autoconnect();
+    }
     show_settings_view(SETTINGS_VIEW_LIST);
 }
 
@@ -1315,6 +1323,53 @@ static void wifi_ap_click_cb(lv_event_t *e)
     wifi_password_screen_focus_default_field(s_wifi_password_input); // SSID is fixed/known - password is the only thing left to type
 }
 
+// --- Wi-Fi row context menu (kebab button -> "Forget network") ---
+//
+// One shared popup, built once in build_wifi_screen() as a sibling of
+// s_wifi_list rather than something created per-row - so a list rebuild
+// (auto-rescan, or the forget action itself completing) never tears it
+// down while it's open. Retargeted on each open via s_wifi_menu_ssid,
+// copied out of the row's click ctx rather than keeping a pointer to it,
+// since s_wifi_click_ctx slots get overwritten on the next rebuild.
+static lv_obj_t *s_wifi_menu_backdrop;
+static lv_obj_t *s_wifi_menu_card;
+static lv_obj_t *s_wifi_menu_ssid_label;
+static char s_wifi_menu_ssid[WIFI_MANAGER_SSID_MAX + 1];
+
+static void wifi_menu_hide(void)
+{
+    lv_obj_add_flag(s_wifi_menu_backdrop, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(s_wifi_menu_card, LV_OBJ_FLAG_HIDDEN);
+}
+
+static void wifi_menu_backdrop_click_cb(lv_event_t *e)
+{
+    (void)e;
+    wifi_menu_hide();
+}
+
+static void wifi_menu_open_cb(lv_event_t *e)
+{
+    const wifi_row_click_ctx_t *ctx = (const wifi_row_click_ctx_t *)lv_event_get_user_data(e);
+    strncpy(s_wifi_menu_ssid, ctx->ssid, WIFI_MANAGER_SSID_MAX);
+    s_wifi_menu_ssid[WIFI_MANAGER_SSID_MAX] = '\0';
+    lv_label_set_text(s_wifi_menu_ssid_label, s_wifi_menu_ssid);
+
+    lv_obj_remove_flag(s_wifi_menu_backdrop, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_remove_flag(s_wifi_menu_card, LV_OBJ_FLAG_HIDDEN);
+}
+
+// No confirmation prompt - matches the watchlist remove button's
+// convention. update_wifi_screen() polls the snapshot every tick and diffs
+// it against what's rendered, so it picks up the profile removal and
+// rebuilds the row on its own; no explicit rebuild call needed here.
+static void wifi_menu_forget_click_cb(lv_event_t *e)
+{
+    (void)e;
+    wifi_manager_forget(s_wifi_menu_ssid);
+    wifi_menu_hide();
+}
+
 // Entry point for the "Add network" row (build_wifi_add_network_row()) -
 // unlike wifi_ap_click_cb(), the SSID isn't known yet, so the field starts
 // empty and editable.
@@ -1412,6 +1467,32 @@ static lv_obj_t *build_lock_icon(lv_obj_t *parent)
     return box;
 }
 
+// Custom-drawn, same reasoning as build_lock_icon(): no vertical "..."
+// (kebab/overflow-menu) glyph exists in the vendored symbol font either.
+// Three small circles stacked in a column, COLOR_MUTED. Only ever created
+// for saved networks - see build_wifi_ap_row()'s menu button.
+static lv_obj_t *build_kebab_icon(lv_obj_t *parent)
+{
+    lv_obj_t *box = lv_obj_create(parent);
+    lv_obj_remove_style_all(box);
+    make_plain_container(box);
+    lv_obj_set_size(box, 6, 18);
+    lv_obj_set_flex_flow(box, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(box, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+
+    for (uint8_t i = 0; i < 3; i++)
+    {
+        lv_obj_t *dot = lv_obj_create(box);
+        lv_obj_remove_style_all(dot);
+        make_plain_container(dot);
+        lv_obj_set_size(dot, 4, 4);
+        lv_obj_set_style_radius(dot, LV_RADIUS_CIRCLE, 0);
+        lv_obj_set_style_bg_color(dot, COLOR_MUTED, 0);
+        lv_obj_set_style_bg_opa(dot, LV_OPA_COVER, 0);
+    }
+    return box;
+}
+
 // Entry point into the "Add Network" flow (empty, editable SSID field) -
 // the "Add hidden network" affordance from the original mockup. Styled as a
 // standalone bordered pill (mockup's .addbtn) below the scanned networks
@@ -1457,8 +1538,9 @@ static void build_wifi_add_network_row(lv_obj_t *parent)
 
 // Row order matches the mockup's .net-row: signal icon on the left, an
 // SSID/status column (SSID on top, status text below it) taking the
-// remaining width, and the lock icon (secured networks only) pinned to the
-// right edge - not [ssid] ... [signal, status, lock] all clustered together.
+// remaining width, and the lock icon (secured networks only) and kebab
+// menu button (saved networks only) pinned to the right edge - not
+// [ssid] ... [signal, status, lock, kebab] all clustered together.
 // `index` selects this row's slot in s_wifi_click_ctx - see that array's
 // declaration and wifi_ap_click_cb().
 static void build_wifi_ap_row(const wifi_display_row_t *disp_row, uint8_t index)
@@ -1525,6 +1607,24 @@ static void build_wifi_ap_row(const wifi_display_row_t *disp_row, uint8_t index)
     if (disp_row->secured)
     {
         build_lock_icon(row);
+    }
+
+    // Kebab ("...") button, saved networks only - opens the shared context
+    // menu (wifi_menu_open_cb(), see its declaration) with "Forget network".
+    // Being a clickable child of the (also clickable) row, LVGL dispatches a
+    // tap here to this button, not to wifi_ap_click_cb() on the row.
+    if (disp_row->saved)
+    {
+        lv_obj_t *menu_btn = lv_obj_create(row);
+        lv_obj_remove_style_all(menu_btn);
+        make_plain_container(menu_btn);
+        lv_obj_add_flag(menu_btn, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_set_size(menu_btn, 32, 40);
+        lv_obj_set_flex_flow(menu_btn, LV_FLEX_FLOW_ROW);
+        lv_obj_set_flex_align(menu_btn, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+        lv_obj_set_ext_click_area(menu_btn, 8);
+        lv_obj_add_event_cb(menu_btn, wifi_menu_open_cb, LV_EVENT_CLICKED, ctx);
+        build_kebab_icon(menu_btn);
     }
 }
 
@@ -1733,7 +1833,13 @@ static void update_wifi_screen(void)
 static void wifi_row_click_cb(lv_event_t *e)
 {
     (void)e;
+    wifi_manager_pause_autoconnect(); // don't let autoconnect retries starve this scan
     wifi_manager_scan_async();
+    // The context menu's backdrop covers s_wifi_screen but not the bottom
+    // nav bar, which lives outside it - so tapping "Exit" while the menu is
+    // open leaves it un-hidden. Reset it here, the one external entry point
+    // into this screen, so a stale open menu can never reappear next visit.
+    wifi_menu_hide();
     show_settings_view(SETTINGS_VIEW_WIFI);
 }
 
@@ -1767,6 +1873,77 @@ static void build_wifi_screen(lv_obj_t *screen)
     lv_obj_set_width(s_wifi_list, LV_PCT(100));
     lv_obj_set_flex_grow(s_wifi_list, 1);
     lv_obj_set_flex_flow(s_wifi_list, LV_FLEX_FLOW_COLUMN);
+
+    // Context menu (backdrop + card), hidden until a row's kebab button
+    // opens it - see wifi_menu_open_cb(). Built once here, as the last two
+    // children of s_wifi_screen, so plain z-order (LVGL renders children in
+    // creation order) puts them above the list without needing
+    // lv_obj_move_foreground() on every open. LV_OBJ_FLAG_IGNORE_LAYOUT is
+    // required on both: s_wifi_screen is a flex column, and without that
+    // flag the flex layout would reposition/reflow these into the column
+    // instead of leaving them at their manually-set overlay position.
+    s_wifi_menu_backdrop = lv_obj_create(s_wifi_screen);
+    lv_obj_remove_style_all(s_wifi_menu_backdrop);
+    make_plain_container(s_wifi_menu_backdrop);
+    lv_obj_add_flag(s_wifi_menu_backdrop,
+                     LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_IGNORE_LAYOUT | LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_size(s_wifi_menu_backdrop, LV_PCT(100), LV_PCT(100));
+    lv_obj_set_pos(s_wifi_menu_backdrop, 0, 0);
+    lv_obj_set_style_bg_color(s_wifi_menu_backdrop, lv_color_black(), 0);
+    lv_obj_set_style_bg_opa(s_wifi_menu_backdrop, LV_OPA_50, 0);
+    lv_obj_add_event_cb(s_wifi_menu_backdrop, wifi_menu_backdrop_click_cb, LV_EVENT_CLICKED, NULL);
+
+    // Anchored to s_wifi_screen's own bottom edge (its height already stops
+    // short of the status/nav bar, see its lv_obj_set_size() call above) so
+    // this floats just above the bottom bar, not centered mid-screen.
+    s_wifi_menu_card = lv_obj_create(s_wifi_screen);
+    lv_obj_remove_style_all(s_wifi_menu_card);
+    make_plain_container(s_wifi_menu_card);
+    lv_obj_add_flag(s_wifi_menu_card, LV_OBJ_FLAG_IGNORE_LAYOUT | LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_size(s_wifi_menu_card, BOARD_JC4880P443C_LCD_H_RES - 2 * 18, LV_SIZE_CONTENT);
+    lv_obj_align(s_wifi_menu_card, LV_ALIGN_BOTTOM_MID, 0, -12);
+    lv_obj_set_flex_flow(s_wifi_menu_card, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_bg_color(s_wifi_menu_card, lv_color_hex(0x12151A), 0);
+    lv_obj_set_style_bg_opa(s_wifi_menu_card, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(s_wifi_menu_card, 14, 0);
+    lv_obj_set_style_border_width(s_wifi_menu_card, 1, 0);
+    lv_obj_set_style_border_color(s_wifi_menu_card, COLOR_HAIRLINE, 0);
+    lv_obj_set_style_pad_bottom(s_wifi_menu_card, 8, 0);
+
+    s_wifi_menu_ssid_label = lv_label_create(s_wifi_menu_card);
+    lv_obj_set_style_text_color(s_wifi_menu_ssid_label, COLOR_MUTED, 0);
+    lv_obj_set_style_text_font(s_wifi_menu_ssid_label, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_pad_top(s_wifi_menu_ssid_label, 16, 0);
+    lv_obj_set_style_pad_left(s_wifi_menu_ssid_label, 18, 0);
+    lv_obj_set_style_pad_bottom(s_wifi_menu_ssid_label, 8, 0);
+    lv_label_set_text(s_wifi_menu_ssid_label, "");
+
+    lv_obj_t *divider = lv_obj_create(s_wifi_menu_card);
+    lv_obj_remove_style_all(divider);
+    make_plain_container(divider);
+    lv_obj_set_size(divider, LV_PCT(100), 1);
+    lv_obj_set_style_bg_color(divider, COLOR_HAIRLINE, 0);
+    lv_obj_set_style_bg_opa(divider, LV_OPA_COVER, 0);
+
+    lv_obj_t *forget_row = lv_obj_create(s_wifi_menu_card);
+    lv_obj_remove_style_all(forget_row);
+    make_plain_container(forget_row);
+    lv_obj_add_flag(forget_row, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_size(forget_row, LV_PCT(100), 52);
+    lv_obj_set_flex_flow(forget_row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(forget_row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_left(forget_row, 18, 0);
+    lv_obj_set_style_pad_column(forget_row, 10, 0);
+    lv_obj_add_event_cb(forget_row, wifi_menu_forget_click_cb, LV_EVENT_CLICKED, NULL);
+
+    lv_obj_t *forget_icon = lv_label_create(forget_row);
+    lv_obj_set_style_text_color(forget_icon, COLOR_DOWN, 0);
+    lv_label_set_text(forget_icon, LV_SYMBOL_TRASH);
+
+    lv_obj_t *forget_label = lv_label_create(forget_row);
+    lv_obj_set_style_text_color(forget_label, COLOR_DOWN, 0);
+    lv_obj_set_style_text_font(forget_label, &lv_font_montserrat_16, 0);
+    lv_label_set_text(forget_label, "Forget network");
 }
 
 static void wifi_password_back_cb(lv_event_t *e)
@@ -2922,6 +3099,7 @@ static int cmd_nav(int argc, char **argv)
     else if (strcmp(target, "wifi") == 0)
     {
         set_active_screen(DISPLAY_UI_SCREEN_SETTINGS);
+        wifi_manager_pause_autoconnect(); // matches wifi_row_click_cb()
         wifi_manager_scan_async(); // matches wifi_row_click_cb(), populates the list instead of "Scanning..."
         show_settings_view(SETTINGS_VIEW_WIFI);
     }

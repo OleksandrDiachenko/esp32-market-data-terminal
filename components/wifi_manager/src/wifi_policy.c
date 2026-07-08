@@ -493,6 +493,34 @@ uint8_t wifi_policy_handle(wifi_policy_t *p, const wifi_policy_input_t *in, wifi
         n = emit(out, max_out, n, act_connect(p->current_ssid, p->current_origin));
         return n;
 
+    case WIFI_POLICY_IN_CMD_PAUSE_AUTOCONNECT:
+        if (p->state == WIFI_POLICY_STATE_CONNECTED)
+        {
+            return 0;
+        }
+        if (p->state == WIFI_POLICY_STATE_CONNECTING)
+        {
+            n = emit(out, max_out, n, act_disconnect());
+        }
+        p->state = WIFI_POLICY_STATE_READY;
+        p->current_origin = WIFI_POLICY_ORIGIN_NONE;
+        p->current_ssid[0] = '\0';
+        p->fallback_pending = false;
+        p->pending_retry_kind = WIFI_POLICY_RETRY_NONE;
+        p->teardown_pending = false;
+        return n;
+
+    case WIFI_POLICY_IN_CMD_RESUME_AUTOCONNECT:
+        if (p->state != WIFI_POLICY_STATE_READY)
+        {
+            return 0;
+        }
+        if (p->profile_count == 0)
+        {
+            return 0;
+        }
+        return begin_from(p, 0, p->profile_count, out, max_out, n);
+
     case WIFI_POLICY_IN_CMD_UPDATE_PASSWORD:
         for (uint8_t i = 0; i < p->profile_count; i++)
         {

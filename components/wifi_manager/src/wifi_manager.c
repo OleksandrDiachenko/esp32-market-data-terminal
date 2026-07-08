@@ -60,6 +60,8 @@ typedef enum
     CMD_DISCONNECT,
     CMD_FORGET,
     CMD_UPDATE_PASSWORD,
+    CMD_PAUSE_AUTOCONNECT,
+    CMD_RESUME_AUTOCONNECT,
 } wifi_mgr_cmd_kind_t;
 
 typedef struct
@@ -823,6 +825,20 @@ static void handle_cmd(const wifi_mgr_cmd_t *cmd)
         break;
     }
 
+    case CMD_PAUSE_AUTOCONNECT:
+    {
+        wifi_policy_input_t in = {.kind = WIFI_POLICY_IN_CMD_PAUSE_AUTOCONNECT};
+        feed_policy(&in);
+        break;
+    }
+
+    case CMD_RESUME_AUTOCONNECT:
+    {
+        wifi_policy_input_t in = {.kind = WIFI_POLICY_IN_CMD_RESUME_AUTOCONNECT};
+        feed_policy(&in);
+        break;
+    }
+
     case CMD_FORGET:
     {
         wifi_policy_input_t in = {.kind = WIFI_POLICY_IN_CMD_FORGET};
@@ -1137,6 +1153,18 @@ esp_err_t wifi_manager_connect_saved(const char *ssid)
 esp_err_t wifi_manager_disconnect(void)
 {
     wifi_mgr_cmd_t cmd = {.kind = CMD_DISCONNECT};
+    return enqueue_cmd(&cmd);
+}
+
+esp_err_t wifi_manager_pause_autoconnect(void)
+{
+    wifi_mgr_cmd_t cmd = {.kind = CMD_PAUSE_AUTOCONNECT};
+    return enqueue_cmd(&cmd);
+}
+
+esp_err_t wifi_manager_resume_autoconnect(void)
+{
+    wifi_mgr_cmd_t cmd = {.kind = CMD_RESUME_AUTOCONNECT};
     return enqueue_cmd(&cmd);
 }
 

@@ -14,6 +14,7 @@ TEST_NAMES = \
 	test_wifi_policy_fallback \
 	test_wifi_policy_scan \
 	test_wifi_policy_switch_network \
+	test_wifi_policy_pause_resume \
 	test_wifi_profile_codec
 
 TESTS = $(addprefix $(BUILD_DIR)/,$(TEST_NAMES))
@@ -46,6 +47,9 @@ $(BUILD_DIR)/test_wifi_policy_scan: test_wifi_policy_scan.c $(POLICY_SOURCES) te
 
 $(BUILD_DIR)/test_wifi_policy_switch_network: test_wifi_policy_switch_network.c $(POLICY_SOURCES) test_common.h | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -o $@ test_wifi_policy_switch_network.c $(POLICY_SOURCES)
+
+$(BUILD_DIR)/test_wifi_policy_pause_resume: test_wifi_policy_pause_resume.c $(POLICY_SOURCES) test_common.h | $(BUILD_DIR)
+	$(CC) $(CFLAGS) -o $@ test_wifi_policy_pause_resume.c $(POLICY_SOURCES)
 
 $(BUILD_DIR)/test_wifi_profile_codec: test_wifi_profile_codec.c $(CODEC_SOURCES) test_common.h | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -o $@ test_wifi_profile_codec.c $(CODEC_SOURCES)

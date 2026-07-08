@@ -128,6 +128,21 @@ esp_err_t wifi_manager_connect_saved(const char *ssid);
 /** Disconnects and pauses autoconnect until the next connect command. */
 esp_err_t wifi_manager_disconnect(void);
 
+/**
+ * Pauses autoconnect: aborts any in-flight connect attempt or pending
+ * retry against saved profiles, without affecting an already-established
+ * connection. Call before scanning so a rapid autoconnect retry cycle
+ * (e.g. all saved networks currently unreachable) can't starve the scan
+ * of radio time.
+ */
+esp_err_t wifi_manager_pause_autoconnect(void);
+
+/**
+ * Resumes the autoconnect cycle if currently idle (not connected, no
+ * connect in flight). No-op otherwise.
+ */
+esp_err_t wifi_manager_resume_autoconnect(void);
+
 /** Removes a saved profile, disconnecting first if it's the active one. */
 esp_err_t wifi_manager_forget(const char *ssid);
 
