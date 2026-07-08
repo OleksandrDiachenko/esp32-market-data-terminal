@@ -1114,9 +1114,15 @@ static void wifi_password_eye_toggle_cb(lv_event_t *e)
 // plain shift toggle.
 
 // Custom mode IDs beyond LVGL's built-in TEXT_LOWER/TEXT_UPPER, used with
-// lv_keyboard_set_mode() below.
-#define WIFI_KB_MODE_SYM_1 2
-#define WIFI_KB_MODE_SYM_2 3
+// lv_keyboard_set_mode() below. lv_keyboard_set_map() writes into LVGL's
+// shared *global* mode->map table (kb_map[]/kb_ctrl[] in lv_keyboard.c;
+// there is no per-object storage), so every custom mode ID used anywhere in
+// the app must be unique across *all* keyboards, not just within this one -
+// reusing an ID (e.g. matching WATCHLIST_KB_MODE_SYM_1/2 below) lets
+// whichever screen is built last silently overwrite the other's symbol-page
+// map. USER_1/2 vs the watchlist keyboard's USER_3/4 keep the two apart.
+#define WIFI_KB_MODE_SYM_1 LV_KEYBOARD_MODE_USER_1
+#define WIFI_KB_MODE_SYM_2 LV_KEYBOARD_MODE_USER_2
 
 // Text mode - lowercase letters
 static const char *const s_wifi_kb_map_lc[] = {
@@ -2077,10 +2083,15 @@ static void build_watchlist_manage_screen(lv_obj_t *screen)
 // SSID field accept anything and validating server-side.
 
 // Custom mode IDs beyond LVGL's built-in TEXT_LOWER/TEXT_UPPER, used with
-// lv_keyboard_set_mode() below - same technique as WIFI_KB_MODE_SYM_1/2
-// (distinct macro names since both live in this same translation unit).
-#define WATCHLIST_KB_MODE_SYM_1 2
-#define WATCHLIST_KB_MODE_SYM_2 3
+// lv_keyboard_set_mode() below - same technique as WIFI_KB_MODE_SYM_1/2, but
+// with distinct USER_3/4 values. lv_keyboard_set_map() writes into LVGL's
+// shared global mode->map table (see the comment by WIFI_KB_MODE_SYM_1/2), so
+// reusing IDs 2/3 here used to let this screen's build (which runs after
+// build_wifi_password_screen()) silently overwrite the Wi-Fi keyboard's
+// symbol-page map with this one's - "Search" would render, and get typed
+// literally, when the Wi-Fi "Add Network" keyboard switched to symbols.
+#define WATCHLIST_KB_MODE_SYM_1 LV_KEYBOARD_MODE_USER_3
+#define WATCHLIST_KB_MODE_SYM_2 LV_KEYBOARD_MODE_USER_4
 
 static const char *const s_watchlist_kb_map_lc[] = {
     "q", "w", "e", "r", "t", "y", "u", "i", "o", "p", "\n",
