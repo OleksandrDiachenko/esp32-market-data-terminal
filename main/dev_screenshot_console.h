@@ -13,7 +13,7 @@
 extern "C" {
 #endif
 
-// Call once, after ota_console_start() (needs the same console REPL).
+// Call once, after dev_console_start() (needs the same console REPL).
 esp_err_t dev_screenshot_console_register(void);
 
 #ifdef __cplusplus

@@ -2,9 +2,12 @@
 
 #include "app_state.h"
 #include "board_jc4880p443c.h"
+#include "esp_app_desc.h"
 #include "esp_check.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "lvgl.h"
+#include "ota_client.h"
 #include "sdkconfig.h"
 #include "settings_store.h"
 #include "time_sync.h"
@@ -54,8 +57,7 @@ typedef enum
     DISPLAY_UI_SCREEN_SETTINGS,
 } display_ui_screen_t;
 
-// Which Settings sub-screen is showing. More views (Wi-Fi, watchlist
-// management, updates) land in later Phase 11 slices.
+// Which Settings sub-screen is showing.
 typedef enum
 {
     SETTINGS_VIEW_LIST = 0,
@@ -68,6 +70,7 @@ typedef enum
     SETTINGS_VIEW_WIFI_PASSWORD,
     SETTINGS_VIEW_WATCHLIST_MANAGE,
     SETTINGS_VIEW_WATCHLIST_ADD,
+    SETTINGS_VIEW_UPDATES,
 } settings_view_t;
 
 // One LVGL row per watchlist symbol. Built once per (re)load of the
@@ -92,6 +95,7 @@ static lv_timer_t *s_update_timer;
 static lv_obj_t *s_settings_list;
 static lv_obj_t *s_settings_wifi_row_desc;
 static lv_obj_t *s_settings_locale_row_desc;
+static lv_obj_t *s_settings_updates_row_desc;
 static lv_obj_t *s_clock_label;
 static lv_obj_t *s_conn_label;
 static lv_obj_t *s_nav_label;
@@ -236,6 +240,27 @@ static lv_obj_t *s_watchlist_add_button;
 static char s_watchlist_pending_symbol[SETTINGS_SYMBOL_MAX_LEN + 1];
 static bool s_watchlist_match_valid;
 
+// --- Updates (Settings > Updates) ---
+
+static lv_obj_t *s_updates_screen;
+static lv_obj_t *s_updates_state_card;    // tinted card - color/icon/text set per-state in updates_screen_reset()
+static lv_obj_t *s_updates_state_icon;
+static lv_obj_t *s_updates_state_text;
+static lv_obj_t *s_updates_current_version_label;
+static lv_obj_t *s_updates_latest_version_label;
+static lv_obj_t *s_updates_last_checked_label;
+static lv_obj_t *s_updates_status_label; // "Installing...", or an error - hidden otherwise
+static lv_obj_t *s_updates_progress_row;   // bar + percent label, shown only while installing
+static lv_obj_t *s_updates_progress_bar;
+static lv_obj_t *s_updates_progress_label;
+// One button, context-dependent - "Check for updates" normally, "Install
+// update" once app_state_get_ota_info() reports update_available, same
+// single-button-changes-label idiom as the bottom nav button
+// (set_active_screen()'s s_nav_label). Its own label text also becomes
+// "Checking..." while a check is in flight - see updates_action_cb().
+static lv_obj_t *s_updates_action_button;
+static lv_obj_t *s_updates_action_label;
+
 // Reused scratch buffers: avoids per-tick dynamic allocation (AGENTS.md: no
 // dynamic allocation in the hot path) and avoids putting
 // sizeof(market_data_kline_t) * APP_STATE_KLINE_CAPACITY (~25KB) on the LVGL
@@ -243,6 +268,58 @@ static bool s_watchlist_match_valid;
 // time within a single timer callback - no concurrent use.
 static market_data_kline_t s_klines_scratch[APP_STATE_KLINE_CAPACITY];
 static int32_t s_chart_scratch[APP_STATE_MAX_SYMBOLS][APP_STATE_KLINE_CAPACITY];
+
+// Buckets the time since event_ms (an app_state_ota_info_t.last_check_ms
+// value) into a coarse "X ago" label - event_ms == 0 means never. No
+// existing relative-time formatter in this file to reuse (update_statusbar()
+// only ever formats wall-clock time via strftime).
+static void format_relative_time(int64_t event_ms, char *out, size_t out_len)
+{
+    if (event_ms == 0)
+    {
+        snprintf(out, out_len, "Never");
+        return;
+    }
+
+    int64_t delta_s = (esp_timer_get_time() / 1000 - event_ms) / 1000;
+    if (delta_s < 60)
+    {
+        snprintf(out, out_len, "Just now");
+    }
+    else if (delta_s < 3600)
+    {
+        snprintf(out, out_len, "%d min ago", (int)(delta_s / 60));
+    }
+    else if (delta_s < 86400)
+    {
+        snprintf(out, out_len, "%d h ago", (int)(delta_s / 3600));
+    }
+    else
+    {
+        snprintf(out, out_len, "%d d ago", (int)(delta_s / 86400));
+    }
+}
+
+static const char *ota_err_message(ota_client_err_t err)
+{
+    switch (err)
+    {
+    case OTA_CLIENT_ERR_NOT_SYNCED:
+        return "Clock not synced yet - try again shortly.";
+    case OTA_CLIENT_ERR_NETWORK:
+    case OTA_CLIENT_ERR_TIMEOUT:
+        return "Couldn't reach GitHub. Try again.";
+    case OTA_CLIENT_ERR_HTTP_STATUS:
+    case OTA_CLIENT_ERR_PARSE:
+        return "Unexpected response from GitHub. Try again.";
+    case OTA_CLIENT_ERR_NO_MEM:
+        return "Not enough memory right now. Try again.";
+    case OTA_CLIENT_ERR_OTA_FAILED:
+        return "Update failed - firmware not changed.";
+    default:
+        return "Something went wrong. Try again.";
+    }
+}
 
 static void format_price(double value, char *out, size_t out_len)
 {
@@ -533,6 +610,7 @@ static void show_settings_view(settings_view_t view)
     lv_obj_add_flag(s_wifi_password_screen, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(s_watchlist_manage_screen, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(s_watchlist_add_screen, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(s_updates_screen, LV_OBJ_FLAG_HIDDEN);
 
     lv_obj_t *target = s_settings_list;
     switch (view)
@@ -564,6 +642,9 @@ static void show_settings_view(settings_view_t view)
     case SETTINGS_VIEW_WATCHLIST_ADD:
         target = s_watchlist_add_screen;
         break;
+    case SETTINGS_VIEW_UPDATES:
+        target = s_updates_screen;
+        break;
     default:
         break;
     }
@@ -587,6 +668,7 @@ static void set_active_screen(display_ui_screen_t screen)
         lv_obj_add_flag(s_wifi_password_screen, LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(s_watchlist_manage_screen, LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(s_watchlist_add_screen, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(s_updates_screen, LV_OBJ_FLAG_HIDDEN);
         lv_label_set_text(s_nav_label, LV_SYMBOL_SETTINGS " Settings");
     }
     else
@@ -694,6 +776,24 @@ static void update_statusbar(void)
     }
     lv_label_set_text_fmt(s_settings_watchlist_row_desc, "%u of %u Binance pairs", (unsigned)watchlist_count,
                            (unsigned)SETTINGS_MAX_WATCHLIST);
+
+    app_state_ota_info_t ota_info;
+    app_state_get_ota_info(&ota_info);
+    if (ota_info.latest_version[0] == '\0')
+    {
+        // app_state_ota_info_t's documented all-zero "never checked" state -
+        // avoid the false "up to date" claim the raw update_available=false
+        // flag would otherwise imply.
+        lv_label_set_text(s_settings_updates_row_desc, "Not checked yet");
+    }
+    else if (ota_info.update_available)
+    {
+        lv_label_set_text_fmt(s_settings_updates_row_desc, "Update available: %s", ota_info.latest_version);
+    }
+    else
+    {
+        lv_label_set_text_fmt(s_settings_updates_row_desc, "Up to date (%s)", ota_info.latest_version);
+    }
 }
 
 static void update_wifi_screen(void); // defined further down, alongside the rest of the Wi-Fi screen
@@ -2901,6 +3001,32 @@ static lv_obj_t *build_watchlist_stat(lv_obj_t *parent, const char *key_text)
     return value_label;
 }
 
+// Same "key: value" column shape as build_watchlist_stat(), but with a
+// neutral muted key label instead of that helper's hardcoded green tint -
+// the Updates status card's background color changes per-state (green/blue/
+// neutral - see updates_screen_reset()), so a fixed green key label would
+// clash against the non-green states.
+static lv_obj_t *build_updates_stat(lv_obj_t *parent, const char *key_text)
+{
+    lv_obj_t *col = lv_obj_create(parent);
+    lv_obj_remove_style_all(col);
+    make_plain_container(col);
+    lv_obj_set_size(col, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(col, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_row(col, 3, 0);
+
+    lv_obj_t *key_label = lv_label_create(col);
+    lv_obj_set_style_text_color(key_label, COLOR_MUTED, 0);
+    lv_obj_set_style_text_font(key_label, &lv_font_montserrat_12, 0);
+    lv_label_set_text(key_label, key_text);
+
+    lv_obj_t *value_label = lv_label_create(col);
+    lv_obj_set_style_text_color(value_label, COLOR_TEXT, 0);
+    lv_obj_set_style_text_font(value_label, &lv_font_montserrat_14, 0);
+    lv_label_set_text(value_label, "--");
+    return value_label;
+}
+
 static void build_watchlist_add_screen(lv_obj_t *screen)
 {
     s_watchlist_add_screen = lv_obj_create(screen);
@@ -3076,6 +3202,299 @@ static void build_watchlist_add_screen(lv_obj_t *screen)
     lv_obj_add_event_cb(s_watchlist_add_keyboard, watchlist_add_keyboard_event_cb, LV_EVENT_VALUE_CHANGED, NULL);
 }
 
+// --- Updates screen ---
+
+static void updates_back_cb(lv_event_t *e)
+{
+    (void)e;
+    show_settings_view(SETTINGS_VIEW_LIST);
+}
+
+// Re-reads current/latest version and last-checked time into the screen's
+// labels, restyles the status card for the current state, and resets
+// button/status/progress visibility to match app_state's current OTA info -
+// called on screen-entry and again after a successful manual check, same
+// screen-entry-reset convention as watchlist_add_screen_reset().
+static void updates_screen_reset(void)
+{
+    const esp_app_desc_t *running = esp_app_get_description();
+    lv_label_set_text(s_updates_current_version_label, running->version);
+
+    app_state_ota_info_t info;
+    app_state_get_ota_info(&info);
+    lv_label_set_text(s_updates_latest_version_label, info.latest_version[0] != '\0' ? info.latest_version : "--");
+
+    char relative_buf[24];
+    format_relative_time(info.last_check_ms, relative_buf, sizeof(relative_buf));
+    lv_label_set_text_fmt(s_updates_last_checked_label, "Last checked: %s", relative_buf);
+
+    if (info.latest_version[0] == '\0')
+    {
+        // Never checked yet - neutral, not a false "up to date" claim (same
+        // reasoning as update_statusbar()'s Settings-row description).
+        lv_obj_set_style_bg_color(s_updates_state_card, COLOR_HAIRLINE, 0);
+        lv_obj_set_style_border_color(s_updates_state_card, COLOR_HAIRLINE, 0);
+        lv_obj_set_style_text_color(s_updates_state_icon, COLOR_MUTED, 0);
+        lv_label_set_text(s_updates_state_icon, LV_SYMBOL_REFRESH);
+        lv_obj_set_style_text_color(s_updates_state_text, COLOR_MUTED, 0);
+        lv_label_set_text(s_updates_state_text, "Not checked yet");
+    }
+    else if (info.update_available)
+    {
+        lv_obj_set_style_bg_color(s_updates_state_card, lv_color_hex(0x0F232A), 0);
+        lv_obj_set_style_border_color(s_updates_state_card, lv_color_hex(0x1E3A46), 0);
+        lv_obj_set_style_text_color(s_updates_state_icon, COLOR_ACCENT, 0);
+        lv_label_set_text(s_updates_state_icon, LV_SYMBOL_DOWNLOAD);
+        lv_obj_set_style_text_color(s_updates_state_text, COLOR_ACCENT, 0);
+        lv_label_set_text(s_updates_state_text, "Update available");
+    }
+    else
+    {
+        lv_obj_set_style_bg_color(s_updates_state_card, lv_color_hex(0x0F2A1E), 0);
+        lv_obj_set_style_border_color(s_updates_state_card, lv_color_hex(0x1E4430), 0);
+        lv_obj_set_style_text_color(s_updates_state_icon, COLOR_UP, 0);
+        lv_label_set_text(s_updates_state_icon, LV_SYMBOL_OK);
+        lv_obj_set_style_text_color(s_updates_state_text, COLOR_UP, 0);
+        lv_label_set_text(s_updates_state_text, "Up to date");
+    }
+
+    lv_obj_add_flag(s_updates_status_label, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(s_updates_progress_row, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_remove_flag(s_updates_action_button, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_clear_state(s_updates_action_button, LV_STATE_DISABLED);
+    lv_label_set_text(s_updates_action_label,
+                       info.update_available ? LV_SYMBOL_DOWNLOAD " Install update" : LV_SYMBOL_REFRESH
+                                                                                       " Check for updates");
+}
+
+static void updates_row_click_cb(lv_event_t *e)
+{
+    (void)e;
+    updates_screen_reset();
+    show_settings_view(SETTINGS_VIEW_UPDATES);
+}
+
+// ota_client_update_to()'s progress callback - fires repeatedly during the
+// download, on the same task/context that called it (the LVGL task, from
+// updates_action_cb() below), so it's safe to touch UI objects directly.
+// Skips the redraw when the rounded percentage hasn't moved since the last
+// call, since this can fire once per HTTP read (every
+// OTA_CLIENT_HTTP_BUFFER_SIZE bytes) and forcing a full LVGL redraw that
+// often would be wasted work for no visible change.
+static void updates_install_progress_cb(size_t bytes_read, size_t total_bytes, void *ctx)
+{
+    (void)ctx;
+    static int s_last_percent_shown = -1;
+
+    int percent = (total_bytes > 0) ? (int)((bytes_read * 100) / total_bytes) : 0;
+    if (percent > 100)
+    {
+        percent = 100;
+    }
+    if (percent == s_last_percent_shown)
+    {
+        return;
+    }
+    s_last_percent_shown = percent;
+
+    lv_bar_set_value(s_updates_progress_bar, percent, LV_ANIM_OFF);
+    lv_label_set_text_fmt(s_updates_progress_label, "%d%%", percent);
+    lv_refr_now(NULL);
+}
+
+// The one Updates action button: "Check for updates" when no update is
+// known to be available, "Install update" once one is (label text set by
+// updates_screen_reset()). Both branches are blocking, like every other
+// user-triggered network call in this file (see watchlist_add_check_cb()'s
+// comment) - bypassing app_state_ota_task's request-flag mechanism entirely
+// since that task's loop only wakes every 60s, which would leave a tapped
+// button looking dead for up to a minute. Installing has no separate
+// confirm step - the button already reads "Install update" by the time a
+// tap can reach this branch, so the tap itself is the explicit decision.
+static void updates_action_cb(lv_event_t *e)
+{
+    (void)e;
+    app_state_ota_info_t info;
+    app_state_get_ota_info(&info);
+
+    if (info.update_available)
+    {
+        lv_obj_add_flag(s_updates_action_button, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_style_text_color(s_updates_status_label, COLOR_MUTED, 0);
+        lv_label_set_text(s_updates_status_label, "Installing update - do not power off...");
+        lv_obj_remove_flag(s_updates_status_label, LV_OBJ_FLAG_HIDDEN);
+        lv_bar_set_value(s_updates_progress_bar, 0, LV_ANIM_OFF);
+        lv_label_set_text(s_updates_progress_label, "0%");
+        lv_obj_remove_flag(s_updates_progress_row, LV_OBJ_FLAG_HIDDEN);
+        lv_refr_now(NULL);
+
+        // Blocking - downloads+flashes the release and reboots the device
+        // on success (never returns); only reached again here on failure.
+        // ~24s for a ~1.66MB image per the OTA hardware-test doc.
+        ota_client_err_t err = ota_client_update_to(info.latest_version, updates_install_progress_cb, NULL);
+
+        lv_obj_add_flag(s_updates_progress_row, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_style_text_color(s_updates_status_label, COLOR_WARN, 0);
+        lv_label_set_text(s_updates_status_label, ota_err_message(err));
+        lv_obj_clear_state(s_updates_action_button, LV_STATE_DISABLED);
+        lv_obj_remove_flag(s_updates_action_button, LV_OBJ_FLAG_HIDDEN);
+        return;
+    }
+
+    lv_obj_add_state(s_updates_action_button, LV_STATE_DISABLED);
+    lv_label_set_text(s_updates_action_label, "Checking...");
+    lv_obj_add_flag(s_updates_status_label, LV_OBJ_FLAG_HIDDEN);
+    lv_refr_now(NULL);
+
+    ota_client_release_info_t check_info;
+    ota_client_err_t err = ota_client_check_latest_release(&check_info);
+
+    if (err == OTA_CLIENT_OK)
+    {
+        app_state_set_ota_info(check_info.update_available, check_info.tag_name);
+        updates_screen_reset(); // refreshes labels/card/button text and re-enables the button
+    }
+    else
+    {
+        lv_label_set_text(s_updates_action_label, LV_SYMBOL_REFRESH " Check for updates");
+        lv_obj_clear_state(s_updates_action_button, LV_STATE_DISABLED);
+        lv_obj_set_style_text_color(s_updates_status_label, COLOR_WARN, 0);
+        lv_label_set_text(s_updates_status_label, ota_err_message(err));
+        lv_obj_remove_flag(s_updates_status_label, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
+static void build_updates_screen(lv_obj_t *screen)
+{
+    s_updates_screen = lv_obj_create(screen);
+    lv_obj_remove_style_all(s_updates_screen);
+    make_plain_container(s_updates_screen);
+    lv_obj_set_size(s_updates_screen, LV_PCT(100), BOARD_JC4880P443C_LCD_V_RES - STATUSBAR_HEIGHT_PX);
+    lv_obj_set_flex_flow(s_updates_screen, LV_FLEX_FLOW_COLUMN);
+
+    build_subscreen_header(s_updates_screen, "Updates", NULL, updates_back_cb);
+
+    lv_obj_t *content = lv_obj_create(s_updates_screen);
+    lv_obj_remove_style_all(content);
+    make_plain_container(content);
+    lv_obj_set_size(content, LV_PCT(100), LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(content, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_left(content, 20, 0);
+    lv_obj_set_style_pad_right(content, 20, 0);
+    lv_obj_set_style_pad_top(content, 16, 0);
+    lv_obj_set_style_pad_row(content, 14, 0);
+
+    const int32_t button_width_px = BOARD_JC4880P443C_LCD_H_RES - 40; // matches content's 20px side padding
+
+    // Status card: a colored icon+text badge (state-dependent - green/blue/
+    // neutral, see updates_screen_reset()) plus current/latest version, all
+    // in one rounded tinted card - same technique as the Watchlist Add
+    // screen's match card (s_watchlist_match_card), just restyled per-state
+    // here instead of a fixed green.
+    s_updates_state_card = lv_obj_create(content);
+    lv_obj_remove_style_all(s_updates_state_card);
+    make_plain_container(s_updates_state_card);
+    lv_obj_set_size(s_updates_state_card, LV_PCT(100), LV_SIZE_CONTENT);
+    lv_obj_set_style_pad_all(s_updates_state_card, 14, 0);
+    lv_obj_set_style_radius(s_updates_state_card, 12, 0);
+    lv_obj_set_style_bg_opa(s_updates_state_card, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(s_updates_state_card, 1, 0);
+    lv_obj_set_flex_flow(s_updates_state_card, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_row(s_updates_state_card, 12, 0);
+
+    lv_obj_t *state_row = lv_obj_create(s_updates_state_card);
+    lv_obj_remove_style_all(state_row);
+    make_plain_container(state_row);
+    lv_obj_set_size(state_row, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(state_row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(state_row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_column(state_row, 8, 0);
+
+    s_updates_state_icon = lv_label_create(state_row);
+    lv_obj_set_style_text_font(s_updates_state_icon, &lv_font_montserrat_18, 0);
+
+    s_updates_state_text = lv_label_create(state_row);
+    lv_obj_set_style_text_font(s_updates_state_text, &lv_font_montserrat_16, 0);
+
+    lv_obj_t *stats_row = lv_obj_create(s_updates_state_card);
+    lv_obj_remove_style_all(stats_row);
+    make_plain_container(stats_row);
+    lv_obj_set_size(stats_row, LV_PCT(100), LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(stats_row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(stats_row, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+
+    s_updates_current_version_label = build_updates_stat(stats_row, "CURRENT VERSION");
+    s_updates_latest_version_label = build_updates_stat(stats_row, "LATEST VERSION");
+
+    s_updates_last_checked_label = lv_label_create(content);
+    lv_obj_set_style_text_color(s_updates_last_checked_label, COLOR_MUTED, 0);
+    lv_obj_set_style_text_font(s_updates_last_checked_label, &lv_font_montserrat_12, 0);
+
+    s_updates_status_label = lv_label_create(content);
+    lv_obj_set_style_text_font(s_updates_status_label, &lv_font_montserrat_12, 0);
+    lv_obj_set_width(s_updates_status_label, LV_PCT(100));
+    lv_label_set_long_mode(s_updates_status_label, LV_LABEL_LONG_WRAP);
+    lv_label_set_text(s_updates_status_label, "");
+    lv_obj_add_flag(s_updates_status_label, LV_OBJ_FLAG_HIDDEN);
+
+    // Download/flash progress - shown only while updates_install_confirm_cb()
+    // is running. esp_https_ota's streaming API has no total-time estimate,
+    // just bytes read vs. image size, so this is a plain 0-100% bar, not a
+    // time-remaining countdown.
+    s_updates_progress_row = lv_obj_create(content);
+    lv_obj_remove_style_all(s_updates_progress_row);
+    make_plain_container(s_updates_progress_row);
+    lv_obj_set_size(s_updates_progress_row, button_width_px, LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(s_updates_progress_row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(s_updates_progress_row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_column(s_updates_progress_row, 10, 0);
+    lv_obj_add_flag(s_updates_progress_row, LV_OBJ_FLAG_HIDDEN);
+
+    s_updates_progress_bar = lv_bar_create(s_updates_progress_row);
+    lv_obj_set_flex_grow(s_updates_progress_bar, 1);
+    lv_obj_set_height(s_updates_progress_bar, 12);
+    lv_bar_set_range(s_updates_progress_bar, 0, 100);
+    lv_bar_set_value(s_updates_progress_bar, 0, LV_ANIM_OFF);
+    lv_obj_set_style_radius(s_updates_progress_bar, 6, LV_PART_MAIN);
+    lv_obj_set_style_bg_color(s_updates_progress_bar, COLOR_HAIRLINE, LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(s_updates_progress_bar, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_border_width(s_updates_progress_bar, 0, LV_PART_MAIN);
+    lv_obj_set_style_radius(s_updates_progress_bar, 6, LV_PART_INDICATOR);
+    // Muted vs. full COLOR_ACCENT - a saturated fill reads as too bright
+    // filling a whole bar; same blue family as the "Update available" card
+    // above, just toned down.
+    lv_obj_set_style_bg_color(s_updates_progress_bar, lv_color_hex(0x3E86A0), LV_PART_INDICATOR);
+    lv_obj_set_style_bg_opa(s_updates_progress_bar, LV_OPA_COVER, LV_PART_INDICATOR);
+
+    s_updates_progress_label = lv_label_create(s_updates_progress_row);
+    lv_obj_set_style_text_color(s_updates_progress_label, COLOR_MUTED, 0);
+    lv_obj_set_style_text_font(s_updates_progress_label, &lv_font_montserrat_12, 0);
+    lv_obj_set_width(s_updates_progress_label, 40);
+    lv_label_set_text(s_updates_progress_label, "0%");
+
+    // One button, always the same outline/muted style regardless of state -
+    // only its label changes ("Check for updates" / "Checking..." /
+    // "Install update", see updates_screen_reset()/updates_action_cb()).
+    s_updates_action_button = lv_button_create(content);
+    lv_obj_remove_style_all(s_updates_action_button);
+    make_plain_container(s_updates_action_button);
+    lv_obj_add_flag(s_updates_action_button, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_size(s_updates_action_button, button_width_px, 44);
+    lv_obj_set_style_margin_top(s_updates_action_button, 4, 0);
+    lv_obj_set_style_radius(s_updates_action_button, 9, 0);
+    lv_obj_set_style_bg_color(s_updates_action_button, COLOR_HAIRLINE, 0);
+    lv_obj_set_style_bg_opa(s_updates_action_button, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_opa(s_updates_action_button, LV_OPA_50, LV_STATE_DISABLED);
+    lv_obj_set_flex_flow(s_updates_action_button, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(s_updates_action_button, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_add_event_cb(s_updates_action_button, updates_action_cb, LV_EVENT_CLICKED, NULL);
+
+    s_updates_action_label = lv_label_create(s_updates_action_button);
+    lv_obj_set_style_text_color(s_updates_action_label, COLOR_TEXT, 0);
+    lv_obj_set_style_text_font(s_updates_action_label, &lv_font_montserrat_14, 0);
+    lv_label_set_text(s_updates_action_label, LV_SYMBOL_REFRESH " Check for updates");
+}
+
 static void locale_row_click_cb(lv_event_t *e)
 {
     (void)e;
@@ -3123,6 +3542,8 @@ static void build_settings_list(lv_obj_t *screen)
         build_settings_row(s_settings_list, LV_SYMBOL_SETTINGS, "Time", "--", locale_row_click_cb);
     s_settings_watchlist_row_desc =
         build_settings_row(s_settings_list, LV_SYMBOL_LIST, "Watchlist symbols", "--", watchlist_row_click_cb);
+    s_settings_updates_row_desc =
+        build_settings_row(s_settings_list, LV_SYMBOL_DOWNLOAD, "Updates", "--", updates_row_click_cb);
 }
 
 // --- Settings > Time > Date format ---
@@ -4144,6 +4565,7 @@ static void display_ui_render(void)
     build_wifi_password_screen(screen);
     build_watchlist_manage_screen(screen);
     build_watchlist_add_screen(screen);
+    build_updates_screen(screen);
     build_statusbar(screen);
 
     set_active_screen(DISPLAY_UI_SCREEN_WATCHLIST);
@@ -4252,6 +4674,12 @@ static int cmd_nav(int argc, char **argv)
         // the keyboard too, and this screen reads as empty without it.
         lv_keyboard_set_textarea(s_watchlist_add_keyboard, s_watchlist_symbol_input);
         lv_obj_remove_flag(s_watchlist_add_keyboard, LV_OBJ_FLAG_HIDDEN);
+    }
+    else if (strcmp(target, "updates") == 0)
+    {
+        set_active_screen(DISPLAY_UI_SCREEN_SETTINGS);
+        updates_screen_reset();
+        show_settings_view(SETTINGS_VIEW_UPDATES);
     }
     else if (strcmp(target, "time") == 0)
     {

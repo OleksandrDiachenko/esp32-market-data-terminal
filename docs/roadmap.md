@@ -10,9 +10,8 @@ Build an ESP-IDF based ESP32-P4 market data terminal as a professional embedded 
   WebSocket market data, runtime state, and OTA updates are all
   hardware-validated
 - Phase 11 (dashboard UI) in progress: watchlist rendering, navigation
-  shell, and Settings (Wi-Fi, Time, Watchlist symbols) are done; still
-  missing a Settings "Updates" entry wired to OTA and a real-hardware
-  validation pass
+  shell, and Settings (Wi-Fi, Time, Watchlist symbols, Updates) are done;
+  still missing a real-hardware validation pass
 - Phases 12-13 (host-side test hardening, portfolio polish) not started
 
 ## Phases
@@ -281,7 +280,13 @@ PR):
    resubscribe on edits - see
    [0007](decisions/0007-watchlist-management.md) and
    [0008](decisions/0008-watchlist-live-resubscribe.md))
-5. Settings: Updates entry - wired to Phase 10's OTA trigger - not started
+5. Settings: Updates entry - wired to Phase 10's OTA trigger - **Done**
+   (tinted status card - Not checked yet/Update available/Up to date -,
+   current/latest version + last-checked time, one context-dependent
+   action button - Check for updates/Checking.../Install update -, and a
+   real download-progress bar via `esp_https_ota`'s streaming
+   begin/perform/finish API; `main/ota_console.c`'s CLI trigger removed as
+   its own header called it a stand-in for this screen)
 6. Hardware validation - full watchlist + settings sweep on real
    hardware, closing out the acceptance criteria below - not started
 
@@ -300,10 +305,10 @@ Acceptance criteria:
 - [x] Bottom bar: navigation between Watchlist and Settings (date/time on
       the left, a Settings button on the right, matching the reference
       device)
-- [ ] Settings: watchlist symbols (add/remove, within the new limit of
+- [x] Settings: watchlist symbols (add/remove, within the new limit of
       10) - done; Wi-Fi connection - done; existing `locale_settings` -
       done; an "Updates" entry wired to Phase 10's OTA check/trigger -
-      still missing (no OTA wiring in `display_ui.c` yet, slice 5 above)
+      done (slice 5 above)
 - [x] Connection/error state (Wi-Fi down, resync in progress) is visible
       on screen, not just in logs - status bar shows
       Connected/Connecting/Reconnecting/Offline, per-row "Resyncing..."

@@ -5,6 +5,7 @@
 #include "app_state_kline_merge.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "settings_store.h"
@@ -313,6 +314,16 @@ esp_err_t app_state_get_ota_info(app_state_ota_info_t *out_info)
         return ESP_ERR_INVALID_ARG;
     }
 
+    if (s_lock == NULL)
+    {
+        // Called before app_state_init() - display_ui_start() creates the
+        // 1s status-bar timer before app_state_init() runs, and that timer
+        // reads OTA info on every tick. Same all-zero "never checked" state
+        // as post-init but before the first check, not an error.
+        *out_info = (app_state_ota_info_t){0};
+        return ESP_OK;
+    }
+
     xSemaphoreTake(s_lock, portMAX_DELAY);
     *out_info = s_ota_info;
     xSemaphoreGive(s_lock);
@@ -326,6 +337,11 @@ esp_err_t app_state_set_ota_info(bool update_available, const char *latest_versi
         return ESP_ERR_INVALID_ARG;
     }
 
+    if (s_lock == NULL)
+    {
+        return ESP_ERR_INVALID_STATE;
+    }
+
     xSemaphoreTake(s_lock, portMAX_DELAY);
     s_ota_info.update_available = update_available;
     if (latest_version != NULL)
@@ -337,6 +353,7 @@ esp_err_t app_state_set_ota_info(bool update_available, const char *latest_versi
     {
         s_ota_info.latest_version[0] = '\0';
     }
+    s_ota_info.last_check_ms = esp_timer_get_time() / 1000;
     xSemaphoreGive(s_lock);
     return ESP_OK;
 }

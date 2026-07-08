@@ -152,7 +152,7 @@ def main():
         "--nav",
         choices=[
             "watchlist", "settings", "wifi", "wifi_password", "watchlist_manage", "watchlist_add", "time",
-            "time_format", "date_format", "time_zones", "time_zone_cities",
+            "time_format", "date_format", "time_zones", "time_zone_cities", "updates",
         ],
         help="Navigate to this screen (via the device's dev-only 'nav' console command) before capturing",
     )
