@@ -205,6 +205,47 @@ esp_err_t app_state_remove_symbol(uint8_t index)
     return ESP_OK;
 }
 
+esp_err_t app_state_move_symbol(uint8_t from_index, uint8_t to_index)
+{
+    if (from_index >= s_symbol_count || to_index >= s_symbol_count)
+    {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    if (from_index >= s_symbol_count || to_index >= s_symbol_count) // re-check under the lock against a concurrent mutation
+    {
+        xSemaphoreGive(s_lock);
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (from_index == to_index)
+    {
+        xSemaphoreGive(s_lock);
+        return ESP_OK;
+    }
+
+    symbol_slot_t moved = s_symbols[from_index];
+    if (from_index < to_index)
+    {
+        for (uint8_t i = from_index; i < to_index; i++)
+        {
+            s_symbols[i] = s_symbols[i + 1];
+        }
+    }
+    else
+    {
+        for (uint8_t i = from_index; i > to_index; i--)
+        {
+            s_symbols[i] = s_symbols[i - 1];
+        }
+    }
+    s_symbols[to_index] = moved;
+    xSemaphoreGive(s_lock);
+
+    ESP_LOGI(TAG, "Moved watchlist symbol '%s' from %u to %u", moved.symbol, (unsigned)from_index, (unsigned)to_index);
+    return ESP_OK;
+}
+
 esp_err_t app_state_record_success(uint8_t index, const market_data_kline_t *klines, uint16_t count, int64_t now_ms)
 {
     if (klines == NULL || index >= s_symbol_count || count > APP_STATE_KLINE_CAPACITY)

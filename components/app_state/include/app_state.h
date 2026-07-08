@@ -86,6 +86,21 @@ esp_err_t app_state_add_symbol(const char *ticker);
 // gaps.
 esp_err_t app_state_remove_symbol(uint8_t index);
 
+// Moves the symbol at from_index to to_index (both
+// 0..app_state_symbol_count()-1), shifting the slots between them by one -
+// a pure permutation, unlike add/remove it never changes
+// app_state_symbol_count() nor allocates/frees a klines buffer. A no-op
+// (returns ESP_OK) if from_index == to_index.
+//
+// Deliberately does NOT push a watchlist event: WS subscriptions are keyed
+// by symbol name string, not index (see app_state_ws_task.c's
+// find_index_by_symbol(), which linear-scans the live table by name on
+// every tick), so reordering is fully transparent to the WS/REST layers -
+// see docs/decisions/0007-watchlist-management.md and
+// 0008-watchlist-live-resubscribe.md. As with add/remove, the caller still
+// owns persisting the change via settings_store_save_symbols().
+esp_err_t app_state_move_symbol(uint8_t from_index, uint8_t to_index);
+
 // --- watchlist-change notifications (sole consumer: app_state_ws_task) ---
 
 typedef enum

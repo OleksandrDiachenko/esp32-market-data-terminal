@@ -27,6 +27,7 @@ static const char *TAG = "display_ui";
 #define ROW_SIDE_COL_WIDTH_PX 128
 #define STATUSBAR_HEIGHT_PX 40
 #define SETTINGS_ROW_HEIGHT_PX 108
+#define WATCHLIST_ROW_HEIGHT_PX 58
 #define SETTINGS_LIST_HEADER_HEIGHT_PX 64
 #define SUBHEADER_HEIGHT_PX 64
 #define SETTINGS_ICON_CHIP_PX 40
@@ -38,6 +39,7 @@ static const char *TAG = "display_ui";
 #define COLOR_STATUSBAR_BG lv_color_hex(0x0F1216)
 #define COLOR_TEXT lv_color_hex(0xECEEF2)
 #define COLOR_MUTED lv_color_hex(0x6E7686)
+#define COLOR_MUTED_DIM lv_color_hex(0x454C59) // darker than COLOR_MUTED - low-emphasis chrome like the drag-handle dots
 #define COLOR_UP lv_color_hex(0x2FD481)
 #define COLOR_DOWN lv_color_hex(0xFF5D6C)
 #define COLOR_WARN lv_color_hex(0xF2A93C)
@@ -166,12 +168,31 @@ static lv_obj_t *s_watchlist_list;
 
 // Per-row click context, indexed the same as the row it was created for -
 // same rationale as s_wifi_click_ctx: stays valid for the row's remove
-// button after build_watchlist_symbol_row() returns.
+// button and drag handle after build_watchlist_symbol_row() returns. `row`
+// is needed by the drag handlers below to reposition/query this specific
+// row's lv_obj_t during a drag.
 typedef struct
 {
     uint8_t index;
+    lv_obj_t *row;
 } watchlist_row_click_ctx_t;
 static watchlist_row_click_ctx_t s_watchlist_click_ctx[SETTINGS_MAX_WATCHLIST];
+
+// Drag-and-drop reorder state for the watchlist Manage screen. Singleton,
+// not per-row: only one drag can be in flight at a time (single-touch GT911
+// panel). Auto-scroll-while-dragging near the list's viewport edges is a
+// deliberate omission - at the SETTINGS_MAX_WATCHLIST cap, all rows plus the
+// "Add symbol" pill still fit within the screen without scrolling, so it
+// isn't needed in practice.
+typedef struct
+{
+    bool active;
+    lv_obj_t *row;
+    uint8_t start_index;
+    int32_t start_point_y;
+    int32_t baseline_y; // advances by consumed row-height steps - see watchlist_drag_pressing_cb()
+} watchlist_drag_state_t;
+static watchlist_drag_state_t s_watchlist_drag;
 
 static lv_obj_t *s_watchlist_add_screen;
 static lv_obj_t *s_watchlist_add_subtitle;
@@ -1941,15 +1962,110 @@ static void watchlist_remove_click_cb(lv_event_t *e)
     watchlist_manage_rebuild();
 }
 
-// One row per watchlist symbol: ticker (flex-grow) + a small red remove
-// button. `index` selects this row's slot in s_watchlist_click_ctx - see
-// that array's declaration and build_wifi_ap_row()'s analogous comment.
+// Arms a drag: captures start state from ctx and the current touch point,
+// and disables s_watchlist_list's scrolling for the duration so the list's
+// own scroll gesture can't compete with the drag (only this handle's small
+// click area triggers a drag, so scrolling everywhere else is unaffected).
+static void watchlist_drag_pressed_cb(lv_event_t *e)
+{
+    const watchlist_row_click_ctx_t *ctx = (const watchlist_row_click_ctx_t *)lv_event_get_user_data(e);
+    lv_point_t point;
+    lv_indev_get_point(lv_indev_active(), &point);
+
+    s_watchlist_drag.active = true;
+    s_watchlist_drag.row = ctx->row;
+    s_watchlist_drag.start_index = ctx->index;
+    s_watchlist_drag.start_point_y = point.y;
+    s_watchlist_drag.baseline_y = point.y;
+
+    lv_obj_remove_flag(s_watchlist_list,
+                        LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_SCROLL_CHAIN | LV_OBJ_FLAG_SCROLL_MOMENTUM);
+}
+
+// Fires continuously while the handle is held and the finger moves.
+// lv_obj_move_to_index() below changes the row's own flex-computed base y
+// (it now occupies a different slot), so the translate offset must be
+// re-based on baseline_y - not on the fixed start_point_y - or the row
+// visually jumps by one extra row height every time it crosses into a new
+// slot. baseline_y is updated *before* the translate is applied so a
+// crossing that happens on this very call is already accounted for.
+static void watchlist_drag_pressing_cb(lv_event_t *e)
+{
+    (void)e;
+    if (!s_watchlist_drag.active)
+    {
+        return;
+    }
+
+    lv_point_t point;
+    lv_indev_get_point(lv_indev_active(), &point);
+
+    int32_t steps = (point.y - s_watchlist_drag.baseline_y) / WATCHLIST_ROW_HEIGHT_PX;
+    if (steps != 0)
+    {
+        int32_t last_index = (int32_t)app_state_symbol_count() - 1; // excludes the trailing "Add symbol" pill
+        int32_t current_index = lv_obj_get_index(s_watchlist_drag.row);
+        int32_t candidate_index = current_index + steps;
+        if (candidate_index < 0)
+        {
+            candidate_index = 0;
+        }
+        else if (candidate_index > last_index)
+        {
+            candidate_index = last_index;
+        }
+        if (candidate_index != current_index)
+        {
+            lv_obj_move_to_index(s_watchlist_drag.row, candidate_index);
+        }
+        s_watchlist_drag.baseline_y += steps * WATCHLIST_ROW_HEIGHT_PX;
+    }
+
+    lv_obj_set_style_translate_y(s_watchlist_drag.row, point.y - s_watchlist_drag.baseline_y, 0);
+}
+
+// Shared by LV_EVENT_RELEASED and LV_EVENT_PRESS_LOST - a lost touch (finger
+// drags off the handle's click area or off-screen) must end the drag the
+// same way a clean release does, or s_watchlist_list would be stuck
+// non-scrollable. Persists the new order only if it actually changed, to
+// avoid a needless NVS blob rewrite on a no-op drag.
+static void watchlist_drag_released_cb(lv_event_t *e)
+{
+    (void)e;
+    if (!s_watchlist_drag.active)
+    {
+        return;
+    }
+
+    lv_obj_set_style_translate_y(s_watchlist_drag.row, 0, 0);
+    uint8_t start_index = s_watchlist_drag.start_index;
+    uint8_t final_index = (uint8_t)lv_obj_get_index(s_watchlist_drag.row);
+
+    lv_obj_add_flag(s_watchlist_list, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_SCROLL_CHAIN | LV_OBJ_FLAG_SCROLL_MOMENTUM);
+    s_watchlist_drag = (watchlist_drag_state_t){0};
+
+    if (final_index == start_index)
+    {
+        return;
+    }
+    if (app_state_move_symbol(start_index, final_index) != ESP_OK)
+    {
+        return;
+    }
+    watchlist_save_current_symbols();
+    watchlist_manage_rebuild(); // resyncs s_watchlist_click_ctx[], stale after move_to_index() during the drag
+}
+
+// One row per watchlist symbol: a drag handle, ticker (flex-grow), and a
+// small red remove button. `index` selects this row's slot in
+// s_watchlist_click_ctx - see that array's declaration and
+// build_wifi_ap_row()'s analogous comment.
 static void build_watchlist_symbol_row(const char *ticker, uint8_t index)
 {
     lv_obj_t *row = lv_obj_create(s_watchlist_list);
     lv_obj_remove_style_all(row);
     make_plain_container(row);
-    lv_obj_set_size(row, LV_PCT(100), 58);
+    lv_obj_set_size(row, LV_PCT(100), WATCHLIST_ROW_HEIGHT_PX);
     lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_left(row, 18, 0);
@@ -1959,14 +2075,64 @@ static void build_watchlist_symbol_row(const char *ticker, uint8_t index)
     lv_obj_set_style_border_width(row, 1, 0);
     lv_obj_set_style_border_color(row, COLOR_HAIRLINE, 0);
 
+    watchlist_row_click_ctx_t *ctx = &s_watchlist_click_ctx[index];
+    ctx->index = index;
+    ctx->row = row;
+
+    // Drag handle - the sole trigger for a reorder drag, deliberately kept
+    // separate from the rest of the (non-clickable) row so the list's own
+    // vertical scroll gesture is never in contention with it.
+    lv_obj_t *drag_handle = lv_obj_create(row);
+    lv_obj_remove_style_all(drag_handle);
+    make_plain_container(drag_handle);
+    // PRESS_LOCK back on top of make_plain_container()'s strip: without it,
+    // lv_indev.c re-searches for the object under the finger on every move
+    // once the point drifts off the handle's (small) hit area and sends
+    // this handle a premature PRESS_LOST, aborting the drag after ~1 row.
+    // PRESS_LOCK keeps this handle as indev's act_obj for the whole press
+    // regardless of where the finger travels - exactly what a drag needs.
+    lv_obj_add_flag(drag_handle, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_PRESS_LOCK);
+    lv_obj_set_size(drag_handle, 28, 28);
+    lv_obj_set_flex_flow(drag_handle, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(drag_handle, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_ext_click_area(drag_handle, 8);
+    lv_obj_add_event_cb(drag_handle, watchlist_drag_pressed_cb, LV_EVENT_PRESSED, ctx);
+    lv_obj_add_event_cb(drag_handle, watchlist_drag_pressing_cb, LV_EVENT_PRESSING, NULL);
+    lv_obj_add_event_cb(drag_handle, watchlist_drag_released_cb, LV_EVENT_RELEASED, NULL);
+    lv_obj_add_event_cb(drag_handle, watchlist_drag_released_cb, LV_EVENT_PRESS_LOST, NULL);
+
+    // Six-dot "grip" (2 columns x 3 rows), positioned by hand rather than via
+    // flex-wrap - LVGL's built-in symbol set (lv_symbol_def.h) has no
+    // dedicated drag-handle glyph, and this reads unambiguously as "drag"
+    // where a hamburger/list icon (LV_SYMBOL_LIST) doesn't.
+    static const int8_t k_drag_dot_pos[6][2] = {
+        {0, 0}, {7, 0}, {0, 6}, {7, 6}, {0, 12}, {7, 12},
+    };
+    // Both the dot grid and each dot must stay non-clickable/non-scrollable
+    // (make_plain_container(), same as every other decorative sub-element in
+    // this file) - otherwise a tap could hit a dot instead of drag_handle,
+    // missing the PRESSED/PRESSING/RELEASED handlers registered on it.
+    lv_obj_t *drag_dots = lv_obj_create(drag_handle);
+    lv_obj_remove_style_all(drag_dots);
+    make_plain_container(drag_dots);
+    lv_obj_set_size(drag_dots, 11, 16);
+    for (uint8_t i = 0; i < 6; i++)
+    {
+        lv_obj_t *dot = lv_obj_create(drag_dots);
+        lv_obj_remove_style_all(dot);
+        make_plain_container(dot);
+        lv_obj_set_size(dot, 4, 4);
+        lv_obj_set_pos(dot, k_drag_dot_pos[i][0], k_drag_dot_pos[i][1]);
+        lv_obj_set_style_radius(dot, LV_RADIUS_CIRCLE, 0);
+        lv_obj_set_style_bg_color(dot, COLOR_MUTED_DIM, 0);
+        lv_obj_set_style_bg_opa(dot, LV_OPA_COVER, 0);
+    }
+
     lv_obj_t *ticker_label = lv_label_create(row);
     lv_obj_set_flex_grow(ticker_label, 1);
     lv_obj_set_style_text_color(ticker_label, COLOR_TEXT, 0);
     lv_obj_set_style_text_font(ticker_label, &lv_font_montserrat_16, 0);
     lv_label_set_text(ticker_label, ticker);
-
-    watchlist_row_click_ctx_t *ctx = &s_watchlist_click_ctx[index];
-    ctx->index = index;
 
     lv_obj_t *remove_btn = lv_button_create(row);
     lv_obj_remove_style_all(remove_btn);
