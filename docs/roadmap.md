@@ -6,10 +6,14 @@ Build an ESP-IDF based ESP32-P4 market data terminal as a professional embedded 
 
 ## Current status
 
-- ESP-IDF project bootstrapped
-- Documentation skeleton added
-- ESP32-P4 startup diagnostics implemented
-- Hardware startup diagnostics validated on JC4880P443C_I_W
+- Phases 0-10 done: board bring-up, Wi-Fi, settings/time sync, REST +
+  WebSocket market data, runtime state, and OTA updates are all
+  hardware-validated
+- Phase 11 (dashboard UI) in progress: watchlist rendering, navigation
+  shell, and Settings (Wi-Fi, Time, Watchlist symbols) are done; still
+  missing a Settings "Updates" entry wired to OTA and a real-hardware
+  validation pass
+- Phases 12-13 (host-side test hardening, portfolio polish) not started
 
 ## Phases
 
@@ -268,31 +272,44 @@ PR):
 2. Navigation shell - bottom bar, Watchlist <-> Settings screen switching -
    **Done** (Settings screen is a placeholder until slices 3-5 add real content)
 3. Settings: connectivity & locale - Wi-Fi, existing `locale_settings`
-   exposed in UI (no new `settings_store` schema)
+   exposed in UI (no new `settings_store` schema) - **Done** (Wi-Fi
+   scan/connect/password/forget-network screens; Settings > Time with
+   24h toggle, Date Format, Time Zones, POSIX TZ editor)
 4. Settings: watchlist management - add/remove symbols,
-   `SETTINGS_MAX_WATCHLIST` 8->10 bump (own ADR, PSRAM impact)
-5. Settings: Updates entry - wired to Phase 10's OTA trigger
+   `SETTINGS_MAX_WATCHLIST` 8->10 bump (own ADR, PSRAM impact) - **Done**
+   (Manage + Add symbol screens, drag-and-drop reordering, live
+   resubscribe on edits - see
+   [0007](decisions/0007-watchlist-management.md) and
+   [0008](decisions/0008-watchlist-live-resubscribe.md))
+5. Settings: Updates entry - wired to Phase 10's OTA trigger - not started
 6. Hardware validation - full watchlist + settings sweep on real
-   hardware, closing out the acceptance criteria below
+   hardware, closing out the acceptance criteria below - not started
 
 Acceptance criteria:
-- [ ] Watchlist: 10 rows at ~76px + a ~40px bottom bar (480x800), each row
+- [x] Watchlist: 10 rows at ~76px + a ~40px bottom bar (480x800), each row
       a distinct LVGL object updated in place (price/change/sparkline from
-      `app_state`) - no full-list redraw per tick
+      `app_state`) - no full-list redraw per tick (`s_rows[]` in
+      `display_ui.c`; actual row height is 58px, not the original ~76px
+      estimate - 10 rows plus the status bar still fit the 800px panel
+      without scrolling)
 - [x] `SETTINGS_MAX_WATCHLIST` raised from 8 to 10 in `settings_store`/
       `app_state` - touches the PSRAM klines buffers sized in Phase 8
       (+25% memory for the watchlist); document this change in an ADR
       alongside this phase - see
       [0007](decisions/0007-watchlist-management.md)
-- [ ] Bottom bar: navigation between Watchlist and Settings (date/time on
+- [x] Bottom bar: navigation between Watchlist and Settings (date/time on
       the left, a Settings button on the right, matching the reference
       device)
 - [ ] Settings: watchlist symbols (add/remove, within the new limit of
-      10), Wi-Fi connection, existing `locale_settings`, an "Updates"
-      entry wired to Phase 10's OTA check/trigger
-- [ ] Connection/error state (Wi-Fi down, resync in progress) is visible
-      on screen, not just in logs
-- [ ] Touch is used for real navigation (bottom bar taps, list scroll/select)
+      10) - done; Wi-Fi connection - done; existing `locale_settings` -
+      done; an "Updates" entry wired to Phase 10's OTA check/trigger -
+      still missing (no OTA wiring in `display_ui.c` yet, slice 5 above)
+- [x] Connection/error state (Wi-Fi down, resync in progress) is visible
+      on screen, not just in logs - status bar shows
+      Connected/Connecting/Reconnecting/Offline, per-row "Resyncing..."
+      during a forced resync
+- [x] Touch is used for real navigation (bottom bar taps, list scroll/select,
+      drag-and-drop reordering on the watchlist manage screen)
 - [ ] Validated on real hardware with live data
 
 ### Phase 12: Host-side tests + CI hardening
