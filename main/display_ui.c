@@ -542,6 +542,10 @@ static void set_active_screen(display_ui_screen_t screen)
 static void nav_click_cb(lv_event_t *e)
 {
     (void)e;
+    if (s_active_screen == DISPLAY_UI_SCREEN_SETTINGS && s_settings_view == SETTINGS_VIEW_WIFI)
+    {
+        wifi_manager_resume_autoconnect();
+    }
     set_active_screen(s_active_screen == DISPLAY_UI_SCREEN_WATCHLIST ? DISPLAY_UI_SCREEN_SETTINGS
                                                                       : DISPLAY_UI_SCREEN_WATCHLIST);
 }
@@ -549,6 +553,10 @@ static void nav_click_cb(lv_event_t *e)
 static void settings_back_cb(lv_event_t *e)
 {
     (void)e;
+    if (s_settings_view == SETTINGS_VIEW_WIFI)
+    {
+        wifi_manager_resume_autoconnect();
+    }
     show_settings_view(SETTINGS_VIEW_LIST);
 }
 
@@ -1687,6 +1695,7 @@ static void update_wifi_screen(void)
 static void wifi_row_click_cb(lv_event_t *e)
 {
     (void)e;
+    wifi_manager_pause_autoconnect(); // don't let autoconnect retries starve this scan
     wifi_manager_scan_async();
     show_settings_view(SETTINGS_VIEW_WIFI);
 }
@@ -2711,6 +2720,7 @@ static int cmd_nav(int argc, char **argv)
     else if (strcmp(target, "wifi") == 0)
     {
         set_active_screen(DISPLAY_UI_SCREEN_SETTINGS);
+        wifi_manager_pause_autoconnect(); // matches wifi_row_click_cb()
         wifi_manager_scan_async(); // matches wifi_row_click_cb(), populates the list instead of "Scanning..."
         show_settings_view(SETTINGS_VIEW_WIFI);
     }
