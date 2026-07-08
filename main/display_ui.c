@@ -1847,12 +1847,15 @@ static void build_wifi_screen(lv_obj_t *screen)
     lv_obj_set_style_bg_opa(s_wifi_menu_backdrop, LV_OPA_50, 0);
     lv_obj_add_event_cb(s_wifi_menu_backdrop, wifi_menu_backdrop_click_cb, LV_EVENT_CLICKED, NULL);
 
+    // Anchored to s_wifi_screen's own bottom edge (its height already stops
+    // short of the status/nav bar, see its lv_obj_set_size() call above) so
+    // this floats just above the bottom bar, not centered mid-screen.
     s_wifi_menu_card = lv_obj_create(s_wifi_screen);
     lv_obj_remove_style_all(s_wifi_menu_card);
     make_plain_container(s_wifi_menu_card);
     lv_obj_add_flag(s_wifi_menu_card, LV_OBJ_FLAG_IGNORE_LAYOUT | LV_OBJ_FLAG_HIDDEN);
-    lv_obj_set_size(s_wifi_menu_card, 300, LV_SIZE_CONTENT);
-    lv_obj_align(s_wifi_menu_card, LV_ALIGN_CENTER, 0, 0);
+    lv_obj_set_size(s_wifi_menu_card, BOARD_JC4880P443C_LCD_H_RES - 2 * 18, LV_SIZE_CONTENT);
+    lv_obj_align(s_wifi_menu_card, LV_ALIGN_BOTTOM_MID, 0, -12);
     lv_obj_set_flex_flow(s_wifi_menu_card, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_bg_color(s_wifi_menu_card, lv_color_hex(0x12151A), 0);
     lv_obj_set_style_bg_opa(s_wifi_menu_card, LV_OPA_COVER, 0);
