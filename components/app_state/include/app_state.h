@@ -146,14 +146,17 @@ typedef struct
 {
     bool update_available;
     char latest_version[APP_STATE_OTA_VERSION_MAX_LEN]; // valid when update_available
+    int64_t last_check_ms; // esp_timer_get_time()/1000 when this result was recorded; 0 = never checked
 } app_state_ota_info_t;
 
-// Thread-safe copy of the last background OTA check's result. All-zero
-// (update_available=false, empty latest_version) until the first check
-// completes - not itself an error.
+// Thread-safe copy of the last OTA check's result. All-zero
+// (update_available=false, empty latest_version, last_check_ms=0) until the
+// first check completes - not itself an error.
 esp_err_t app_state_get_ota_info(app_state_ota_info_t *out_info);
 
-// Writer API (app_state_ota_task only).
+// Writer API - called by app_state_ota_task's periodic background check and
+// by the Settings > Updates screen's manual "Check for updates" action.
+// Stamps last_check_ms internally (esp_timer_get_time()/1000).
 esp_err_t app_state_set_ota_info(bool update_available, const char *latest_version);
 
 // Applies one live `@kline_1s` update from app_state_ws_task into index's

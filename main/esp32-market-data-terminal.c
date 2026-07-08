@@ -4,9 +4,9 @@
 #include "app_state_ota_task.h"
 #include "app_state_sync_task.h"
 #include "app_state_ws_task.h"
+#include "dev_console.h"
 #include "dev_screenshot_console.h"
 #include "display_ui.h"
-#include "ota_console.h"
 #include "settings_store.h"
 #include "time_sync.h"
 #include "wifi_manager.h"
@@ -126,16 +126,16 @@ void app_main(void)
         ESP_LOGW(TAG, "OTA background task failed to start; continuing without update checks");
     }
 
-    // CLI/log-driven manual OTA trigger (Phase 10's roadmap scope) - a
-    // failure here is non-fatal, same as the other soft dependencies above.
-    if (ota_console_start() != ESP_OK)
+    // Dev-only console REPL (no-op unless CONFIG_DEV_SCREENSHOT_CONSOLE is
+    // enabled locally) - the screenshot/nav commands below register into it.
+    if (dev_console_start() != ESP_OK)
     {
-        ESP_LOGW(TAG, "OTA console failed to start; manual ota_check/ota_update commands unavailable");
+        ESP_LOGW(TAG, "Dev console failed to start; screenshot/nav commands unavailable");
     }
 
     // Dev-only "screenshot" console command (no-op unless
     // CONFIG_DEV_SCREENSHOT_CONSOLE is enabled locally) - shares the same
-    // console REPL ota_console_start() just registered into.
+    // console REPL dev_console_start() just registered into.
     if (dev_screenshot_console_register() != ESP_OK)
     {
         ESP_LOGW(TAG, "Dev screenshot console command failed to register");

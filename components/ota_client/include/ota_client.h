@@ -8,6 +8,7 @@
 // manual trigger are Phase 10's next delivery slice, not this one's.
 
 #include <stdbool.h>
+#include <stddef.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -40,13 +41,21 @@ typedef struct
 // esp_app_desc_t.version.
 ota_client_err_t ota_client_check_latest_release(ota_client_release_info_t *out_info);
 
+// Called periodically during ota_client_update_to()'s download (from the
+// same task/context that called it - there is no worker thread here, so a
+// UI callback may safely touch UI state directly). total_bytes is 0 until
+// the image size is known from the response headers.
+typedef void (*ota_client_progress_cb_t)(size_t bytes_read, size_t total_bytes, void *ctx);
+
 // Downloads and flashes the firmware asset for release `tag` via
-// esp_https_ota, then reboots on success (does not return). `tag` is
+// esp_https_ota's streaming begin/perform/finish API (so progress_cb can be
+// driven off it), then reboots on success (does not return). `tag` is
 // normally an ota_client_release_info_t.tag_name from a prior
 // ota_client_check_latest_release() call that reported update_available.
+// progress_cb/progress_ctx may be NULL if no progress feedback is needed.
 // On failure, returns without having touched the currently-running app
 // partition - esp_https_ota writes to the other OTA slot.
-ota_client_err_t ota_client_update_to(const char *tag);
+ota_client_err_t ota_client_update_to(const char *tag, ota_client_progress_cb_t progress_cb, void *progress_ctx);
 
 #ifdef __cplusplus
 }

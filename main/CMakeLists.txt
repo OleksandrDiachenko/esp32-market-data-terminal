@@ -4,7 +4,7 @@ idf_component_register(
         "startup_diagnostics.c"
         "app_lifecycle.c"
         "display_ui.c"
-        "ota_console.c"
+        "dev_console.c"
         "dev_screenshot_console.c"
     INCLUDE_DIRS
         "."
@@ -14,8 +14,10 @@ idf_component_register(
         settings_store
         time_sync
         app_state
+        ota_client
         nvs_flash
         console
         app_update
+        esp_timer
         mbedtls
 )

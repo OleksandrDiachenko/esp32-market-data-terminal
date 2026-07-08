@@ -1,5 +1,6 @@
 #include "ota_client.h"
 
+#include <stdlib.h>
 #include <string.h>
 
 #include "esp_app_desc.h"
@@ -81,18 +82,32 @@ ota_client_err_t ota_client_check_latest_release(ota_client_release_info_t *out_
         return OTA_CLIENT_ERR_HTTP_STATUS;
     }
 
-    static char json_buf[OTA_CLIENT_JSON_READ_CAP];
-    int read_len = esp_http_client_read_response(client, json_buf, sizeof(json_buf) - 1);
+    // Heap-allocated, not a function-static buffer: this call can now come
+    // from either app_state_ota_task's background loop or the Settings >
+    // Updates screen's "Check for updates" button (a different task), and a
+    // shared static buffer would let those two calls race on the same
+    // memory if they ever overlap.
+    char *json_buf = malloc(OTA_CLIENT_JSON_READ_CAP);
+    if (json_buf == NULL)
+    {
+        esp_http_client_close(client);
+        esp_http_client_cleanup(client);
+        return OTA_CLIENT_ERR_NO_MEM;
+    }
+
+    int read_len = esp_http_client_read_response(client, json_buf, OTA_CLIENT_JSON_READ_CAP - 1);
     esp_http_client_close(client);
     esp_http_client_cleanup(client);
     if (read_len < 0)
     {
+        free(json_buf);
         return OTA_CLIENT_ERR_NETWORK;
     }
     json_buf[read_len] = '\0';
 
     ota_client_err_t parse_err =
         ota_client_extract_tag_name(json_buf, (size_t)read_len, out_info->tag_name, sizeof(out_info->tag_name));
+    free(json_buf);
     if (parse_err != OTA_CLIENT_OK)
     {
         return parse_err;
@@ -103,7 +118,7 @@ ota_client_err_t ota_client_check_latest_release(ota_client_release_info_t *out_
     return OTA_CLIENT_OK;
 }
 
-ota_client_err_t ota_client_update_to(const char *tag)
+ota_client_err_t ota_client_update_to(const char *tag, ota_client_progress_cb_t progress_cb, void *progress_ctx)
 {
     if (tag == NULL || tag[0] == '\0')
     {
@@ -141,12 +156,41 @@ ota_client_err_t ota_client_update_to(const char *tag)
         .http_config = &http_config,
     };
 
-    // Blocking, one-call API: sufficient for Phase 10's scope (no
-    // progress reporting yet - that's Phase 11's Settings/Updates entry).
-    esp_err_t err = esp_https_ota(&ota_config);
+    // Streaming begin/perform/finish rather than the single-call
+    // esp_https_ota() helper, so progress_cb can be driven off
+    // esp_https_ota_get_image_len_read()/_get_image_size() between chunks -
+    // this is what the Settings > Updates screen's progress bar reads.
+    esp_https_ota_handle_t https_ota_handle = NULL;
+    esp_err_t err = esp_https_ota_begin(&ota_config, &https_ota_handle);
     if (err != ESP_OK)
     {
-        ESP_LOGE(TAG, "OTA failed: %s", esp_err_to_name(err));
+        ESP_LOGE(TAG, "OTA begin failed: %s", esp_err_to_name(err));
+        return OTA_CLIENT_ERR_OTA_FAILED;
+    }
+
+    int total_size = esp_https_ota_get_image_size(https_ota_handle);
+    do
+    {
+        err = esp_https_ota_perform(https_ota_handle);
+        if (progress_cb != NULL)
+        {
+            int read_so_far = esp_https_ota_get_image_len_read(https_ota_handle);
+            progress_cb((size_t)(read_so_far > 0 ? read_so_far : 0), (size_t)(total_size > 0 ? total_size : 0),
+                        progress_ctx);
+        }
+    } while (err == ESP_ERR_HTTPS_OTA_IN_PROGRESS);
+
+    if (err != ESP_OK || !esp_https_ota_is_complete_data_received(https_ota_handle))
+    {
+        ESP_LOGE(TAG, "OTA download failed: %s", esp_err_to_name(err));
+        esp_https_ota_abort(https_ota_handle);
+        return OTA_CLIENT_ERR_OTA_FAILED;
+    }
+
+    err = esp_https_ota_finish(https_ota_handle);
+    if (err != ESP_OK)
+    {
+        ESP_LOGE(TAG, "OTA finish failed: %s", esp_err_to_name(err));
         return OTA_CLIENT_ERR_OTA_FAILED;
     }
 
