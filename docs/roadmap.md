@@ -6,12 +6,9 @@ Build an ESP-IDF based ESP32-P4 market data terminal as a professional embedded 
 
 ## Current status
 
-- Phases 0-10 done: board bring-up, Wi-Fi, settings/time sync, REST +
-  WebSocket market data, runtime state, and OTA updates are all
-  hardware-validated
-- Phase 11 (dashboard UI) in progress: watchlist rendering, navigation
-  shell, and Settings (Wi-Fi, Time, Watchlist symbols, Updates) are done;
-  still missing a real-hardware validation pass
+- Phases 0-11 done: board bring-up, Wi-Fi, settings/time sync, REST +
+  WebSocket market data, runtime state, OTA updates, and the dashboard UI
+  (watchlist, navigation shell, Settings) are all hardware-validated
 - Phases 12-13 (host-side test hardening, portfolio polish) not started
 
 ## Phases
@@ -255,7 +252,7 @@ Acceptance criteria:
       `docs/validation/ota-firmware-update-hardware-test.md`
 
 ### Phase 11: Market data dashboard UI
-Status: In progress
+Status: Done
 
 Scope: connect `display_ui`/LVGL to `app_state` and `settings_store` - a
 real watchlist screen instead of the current static label, plus a
@@ -288,7 +285,8 @@ PR):
    begin/perform/finish API; `main/ota_console.c`'s CLI trigger removed as
    its own header called it a stand-in for this screen)
 6. Hardware validation - full watchlist + settings sweep on real
-   hardware, closing out the acceptance criteria below - not started
+   hardware, closing out the acceptance criteria below - **Done** (see
+   `docs/validation/dashboard-ui-hardware-test.md`)
 
 Acceptance criteria:
 - [x] Watchlist: 10 rows at ~76px + a ~40px bottom bar (480x800), each row
@@ -315,7 +313,8 @@ Acceptance criteria:
       during a forced resync
 - [x] Touch is used for real navigation (bottom bar taps, list scroll/select,
       drag-and-drop reordering on the watchlist manage screen)
-- [ ] Validated on real hardware with live data
+- [x] Validated on real hardware with live data - see
+      `docs/validation/dashboard-ui-hardware-test.md`
 
 ### Phase 12: Host-side tests + CI hardening
 Status: Planned
