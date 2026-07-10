@@ -37,7 +37,6 @@ static const char *TAG = "display_ui";
 #define SUBHEADER_HEIGHT_PX 64
 #define SETTINGS_ICON_CHIP_PX 40
 #define TIME_LIST_ROW_HEIGHT_PX 60 // Time format / Date format / Time zones list rows
-#define NAV_BUTTON_WIDTH_PX 130
 #define WIFI_PASSWORD_FIELD_HEIGHT_PX 54 // matches the eye-toggle button below it
 #define UPDATE_PERIOD_MS 1000
 // Fixed integer range fed to lv_chart_set_axis_range()/set_series_ext_y_array().
@@ -107,7 +106,7 @@ static lv_obj_t *s_settings_wifi_row_desc;
 static lv_obj_t *s_settings_locale_row_desc;
 static lv_obj_t *s_settings_updates_row_desc;
 static lv_obj_t *s_clock_label;
-static lv_obj_t *s_conn_label;
+static lv_obj_t *s_statusbar_signal_bars[4]; // status bar's wifi signal icon, bars[0..3] short-to-tall
 static lv_obj_t *s_nav_label;
 static display_ui_screen_t s_active_screen;
 static settings_view_t s_settings_view;
@@ -678,13 +677,13 @@ static void set_active_screen(display_ui_screen_t screen)
         lv_obj_add_flag(s_watchlist_manage_screen, LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(s_watchlist_add_screen, LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(s_updates_screen, LV_OBJ_FLAG_HIDDEN);
-        lv_label_set_text(s_nav_label, LV_SYMBOL_SETTINGS " Settings");
+        lv_label_set_text(s_nav_label, "SETTINGS");
     }
     else
     {
         lv_obj_add_flag(s_rows_container, LV_OBJ_FLAG_HIDDEN);
         show_settings_view(SETTINGS_VIEW_LIST); // always re-enter Settings at its top level
-        lv_label_set_text(s_nav_label, LV_SYMBOL_LEFT " Exit");
+        lv_label_set_text(s_nav_label, "EXIT");
     }
 }
 
@@ -714,6 +713,37 @@ static void settings_back_cb(lv_event_t *e)
 }
 
 static void tz_describe(const char *tz_label, const char *posix, char *out, size_t out_len); // with the Time screens, below
+static bool wifi_ap_is_live_connected(const wifi_manager_snapshot_t *snap, const char *ssid); // with the Wi-Fi screens, below
+static uint8_t wifi_rssi_to_bars(int8_t rssi);                                                // with the Wi-Fi screens, below
+
+// Looks up the RSSI of the currently-connected network from the latest scan
+// pass, for the status bar's signal icon. Same staleness caveat as
+// wifi_ap_is_live_connected() - see its comment - but for a single icon that
+// only distinguishes "no signal"/"full bars" this is imperceptible in
+// practice.
+static bool statusbar_lookup_connected_rssi(const wifi_manager_snapshot_t *snap, int8_t *out_rssi)
+{
+    for (uint8_t i = 0; i < snap->ap_count; i++)
+    {
+        if (wifi_ap_is_live_connected(snap, snap->aps[i].ssid))
+        {
+            *out_rssi = snap->aps[i].rssi;
+            return true;
+        }
+    }
+    return false;
+}
+
+// Sets the status bar's 4-bar signal icon: `bars` (0-4) lit in `color`,
+// the rest dimmed to COLOR_HAIRLINE - mirrors build_signal_icon()'s look
+// (see below) without needing to rebuild the icon on every update.
+static void statusbar_set_signal_bars(uint8_t bars, lv_color_t color)
+{
+    for (uint8_t i = 0; i < 4; i++)
+    {
+        lv_obj_set_style_bg_color(s_statusbar_signal_bars[i], (i < bars) ? color : COLOR_HAIRLINE, 0);
+    }
+}
 
 static void update_statusbar(void)
 {
@@ -745,20 +775,26 @@ static void update_statusbar(void)
     switch (snapshot.state)
     {
     case WIFI_MANAGER_STATE_CONNECTED:
-        lv_obj_set_style_text_color(s_conn_label, COLOR_UP, 0);
-        lv_label_set_text(s_conn_label, LV_SYMBOL_WIFI " Connected");
+    {
+        int8_t rssi;
+        // Edge case at 1b) in build_wifi_display_rows() below: the manager
+        // considers a profile connected but the last scan pass hasn't caught
+        // up yet - no rssi to size the icon by, so show full bars rather
+        // than none (an empty icon reads as "no signal", not "unknown").
+        uint8_t bars = statusbar_lookup_connected_rssi(&snapshot, &rssi) ? wifi_rssi_to_bars(rssi) : 4;
+        // COLOR_MUTED, not COLOR_UP - matches the SETTINGS/EXIT label next to
+        // it rather than reading as its own accent color.
+        statusbar_set_signal_bars(bars, COLOR_MUTED);
         break;
+    }
     case WIFI_MANAGER_STATE_CONNECTING:
-        lv_obj_set_style_text_color(s_conn_label, COLOR_WARN, 0);
-        lv_label_set_text(s_conn_label, LV_SYMBOL_WIFI " Connecting...");
+        statusbar_set_signal_bars(2, COLOR_WARN);
         break;
     case WIFI_MANAGER_STATE_ERROR:
-        lv_obj_set_style_text_color(s_conn_label, COLOR_WARN, 0);
-        lv_label_set_text(s_conn_label, LV_SYMBOL_WIFI " Reconnecting...");
+        statusbar_set_signal_bars(1, COLOR_WARN);
         break;
     default:
-        lv_obj_set_style_text_color(s_conn_label, COLOR_MUTED, 0);
-        lv_label_set_text(s_conn_label, LV_SYMBOL_WIFI " Offline");
+        statusbar_set_signal_bars(0, COLOR_HAIRLINE);
         break;
     }
 
@@ -846,6 +882,39 @@ static void update_timer_cb(lv_timer_t *timer)
     }
 }
 
+// Same 4-bar signal glyph as build_signal_icon() (see the Wi-Fi list rows,
+// below) but keeps a pointer to each bar in s_statusbar_signal_bars so
+// update_statusbar() can recolor them in place instead of rebuilding the
+// icon on every tick.
+static void build_statusbar_signal_icon(lv_obj_t *parent)
+{
+    lv_obj_t *box = lv_obj_create(parent);
+    lv_obj_remove_style_all(box);
+    lv_obj_remove_flag(box, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CLICK_FOCUSABLE | LV_OBJ_FLAG_SCROLLABLE |
+                                 LV_OBJ_FLAG_SCROLL_ELASTIC | LV_OBJ_FLAG_SCROLL_MOMENTUM |
+                                 LV_OBJ_FLAG_SCROLL_CHAIN | LV_OBJ_FLAG_SCROLL_WITH_ARROW |
+                                 LV_OBJ_FLAG_SNAPPABLE | LV_OBJ_FLAG_PRESS_LOCK | LV_OBJ_FLAG_GESTURE_BUBBLE);
+    lv_obj_set_size(box, 24, 18);
+    lv_obj_set_flex_flow(box, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(box, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_END);
+
+    static const uint8_t heights[4] = {5, 9, 13, 17};
+    for (uint8_t i = 0; i < 4; i++)
+    {
+        lv_obj_t *bar = lv_obj_create(box);
+        lv_obj_remove_style_all(bar);
+        lv_obj_remove_flag(bar, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CLICK_FOCUSABLE | LV_OBJ_FLAG_SCROLLABLE |
+                                     LV_OBJ_FLAG_SCROLL_ELASTIC | LV_OBJ_FLAG_SCROLL_MOMENTUM |
+                                     LV_OBJ_FLAG_SCROLL_CHAIN | LV_OBJ_FLAG_SCROLL_WITH_ARROW |
+                                     LV_OBJ_FLAG_SNAPPABLE | LV_OBJ_FLAG_PRESS_LOCK | LV_OBJ_FLAG_GESTURE_BUBBLE);
+        lv_obj_set_size(bar, 4, heights[i]);
+        lv_obj_set_style_radius(bar, 1, 0);
+        lv_obj_set_style_bg_opa(bar, LV_OPA_COVER, 0);
+        lv_obj_set_style_bg_color(bar, COLOR_HAIRLINE, 0);
+        s_statusbar_signal_bars[i] = bar;
+    }
+}
+
 static void build_statusbar(lv_obj_t *screen)
 {
     lv_obj_t *bar = lv_obj_create(screen);
@@ -882,18 +951,16 @@ static void build_statusbar(lv_obj_t *screen)
                                    LV_OBJ_FLAG_SCROLL_CHAIN | LV_OBJ_FLAG_SCROLL_WITH_ARROW |
                                    LV_OBJ_FLAG_SNAPPABLE | LV_OBJ_FLAG_PRESS_LOCK | LV_OBJ_FLAG_GESTURE_BUBBLE);
     // Width defaults to LV_DPI_DEF (a fixed ~130px), not content-fitting -
-    // left unset, "Connected"/"Exit" (wider than the initial "--"
-    // placeholder) would overflow past that fixed box and clip on the left
-    // since this container is packed flush to the bar's right edge.
+    // left unset, "Exit" (wider than "Settings") would overflow past that
+    // fixed box and clip on the left since this container is packed flush
+    // to the bar's right edge.
     lv_obj_set_width(right, LV_SIZE_CONTENT);
     lv_obj_set_height(right, LV_SIZE_CONTENT);
     lv_obj_set_flex_flow(right, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(right, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_column(right, 16, 0);
 
-    s_conn_label = lv_label_create(right);
-    lv_obj_set_style_text_font(s_conn_label, &lv_font_montserrat_14, 0);
-    lv_label_set_text(s_conn_label, LV_SYMBOL_WIFI " --");
+    build_statusbar_signal_icon(right);
 
     lv_obj_t *nav_btn = lv_button_create(right);
     lv_obj_remove_style_all(nav_btn);
@@ -909,30 +976,41 @@ static void build_statusbar(lv_obj_t *screen)
     // lv_obj_remove_style_all() also resets width/height back to the base
     // class default (a fixed ~130x130px, LV_DPI_DEF) - left unset, the
     // button was far taller than the 40px bar and got clipped by it. Fill
-    // the bar's full height instead, and let width fit the padded label;
-    // remove_style_all also dropped the button's own default centering
-    // layout, so that's reapplied explicitly too.
+    // the bar's full height instead; remove_style_all also dropped the
+    // button's own default centering layout, so that's reapplied explicitly
+    // too.
     lv_obj_set_height(nav_btn, STATUSBAR_HEIGHT_PX);
-    // Fixed (not content-fitting) width: "Settings"/"Exit" must not resize
-    // the button (and shift its position) when the label text changes.
-    lv_obj_set_width(nav_btn, NAV_BUTTON_WIDTH_PX);
     lv_obj_set_flex_flow(nav_btn, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(nav_btn, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    // Right-aligned (not centered): with a fixed width below, this pins the
+    // label to the button's right edge so SETTINGS/EXIT stay flush with the
+    // bar's pad_right - same margin the clock label has from pad_left -
+    // regardless of which (differently-sized) text is showing.
+    lv_obj_set_flex_align(nav_btn, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     // A label-sized hit target is as hard to tap as a hyperlink - pad the
     // button past its text, then extend the touch-sensitive area further
     // still, without changing how big it looks.
     lv_obj_set_style_pad_top(nav_btn, 4, 0);
     lv_obj_set_style_pad_bottom(nav_btn, 4, 0);
     lv_obj_set_style_pad_left(nav_btn, 10, 0);
-    lv_obj_set_style_pad_right(nav_btn, 10, 0);
     lv_obj_set_ext_click_area(nav_btn, 16);
+    // Fixed width sized to the wider of "SETTINGS"/"EXIT" (plus the tap-area
+    // padding above) - not content-fitting. Swapping between the two texts
+    // must not resize the button, since that would also shift the signal
+    // icon next to it (this container's other child, packed against the
+    // same right-aligned edge).
+    lv_point_t settings_sz;
+    lv_point_t exit_sz;
+    lv_text_get_size(&settings_sz, "SETTINGS", &lv_font_montserrat_14, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+    lv_text_get_size(&exit_sz, "EXIT", &lv_font_montserrat_14, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+    int32_t nav_label_w = settings_sz.x > exit_sz.x ? settings_sz.x : exit_sz.x;
+    lv_obj_set_width(nav_btn, nav_label_w + 10 /* pad_left above */);
     lv_obj_add_event_cb(nav_btn, nav_click_cb, LV_EVENT_CLICKED, NULL);
     s_nav_label = lv_label_create(nav_btn);
     // Muted, not accent - this is secondary nav text (matches the mockup's
     // own subheader back-arrow color), not an interactive accent highlight.
     lv_obj_set_style_text_color(s_nav_label, COLOR_MUTED, 0);
     lv_obj_set_style_text_font(s_nav_label, &lv_font_montserrat_14, 0);
-    lv_label_set_text(s_nav_label, LV_SYMBOL_SETTINGS " Settings");
+    lv_label_set_text(s_nav_label, "SETTINGS");
 }
 
 // Strips the same interactive-container defaults from a plain lv_obj_create()
