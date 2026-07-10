@@ -2,6 +2,13 @@
 
 ## Current Validation
 - `idf.py build`
+
+### Host-tested (pure logic)
+Every component below has a `host_test/` directory: a plain `Makefile`
+(`gcc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined`, no
+Unity/CMake) compiling each pure-C source file with no ESP-IDF includes.
+Together these cover every parser and every state machine in the codebase.
+
 - `make -C components/wifi_manager/host_test test` — host-side tests for
   the Wi-Fi connection policy state machine and profile blob codec (pure
   C, no ESP-IDF, built with plain gcc + ASan/UBSan). Runs in CI as the
@@ -38,6 +45,27 @@
   sparklines. Pure C, same gcc + ASan/UBSan setup, no ESP-IDF dependency.
   Runs in the same `host-tests` CI job.
 
+### Not host-tested, and why
+The remaining files in each of the above components (plus a few components
+with no `host_test/` directory at all) are ESP-IDF/FreeRTOS glue that can't
+run off-target without real hardware, network stacks, or NVS - see
+AGENTS.md's testing philosophy: don't unit-test Wi-Fi, TLS, or the real
+display directly. Checked individually; none have separable pure logic
+worth extracting into a host-testable module.
+
+| Component | Not host-tested | Why |
+|---|---|---|
+| `wifi_manager` | `wifi_manager.c`, `wifi_manager_slave_ota.c` | `esp_wifi`, `esp_event` |
+| `wifi_manager` | `wifi_profile_store.c` | real NVS I/O (not pure) |
+| `settings_store` | `settings_store.c` | NVS |
+| `market_data_client` | `market_data_client.c`, `market_data_http.c` | `esp_http_client`, `esp_crt_bundle` |
+| `market_data_ws_client` | `market_data_ws_client.c` | `esp-websocket-client`, `esp_crt_bundle` |
+| `app_state` | `app_state.c`, `app_state_sync_task.c`, `app_state_ws_task.c`, `app_state_ota_task.c` | FreeRTOS task/event orchestration over the above |
+| `ota_client` | `ota_client.c` | `esp_https_ota`, `esp_app_desc` |
+| `time_sync` | whole component (no `host_test/` dir) | `esp_netif_sntp`, `xTaskCreate`, `setenv`/`tzset` - no separable pure logic |
+| `board_jc4880p443c` | whole component | header-only pin/config constants, no `.c` files |
+| `main/` | `display_ui.c`, `app_lifecycle.c`, `startup_diagnostics.c`, `dev_console.c`, `dev_screenshot_console.c`, `esp32-market-data-terminal.c` | LVGL/display, FreeRTOS app entrypoint, ESP-IDF chip/heap APIs |
+
 ## Static Analysis
 - `cppcheck` — runs in CI (`cppcheck` job in `.github/workflows/build.yml`)
   against the same 15 pure-logic `.c` files the `host-tests` job already
@@ -59,5 +87,4 @@
   future step once someone reviews and applies that diff.
 
 ## Planned Tests
-- host-side parser tests
 - hardware tests are manual for now (see `docs/validation/`)
