@@ -9,7 +9,10 @@ Build an ESP-IDF based ESP32-P4 market data terminal as a professional embedded 
 - Phases 0-11 done: board bring-up, Wi-Fi, settings/time sync, REST +
   WebSocket market data, runtime state, OTA updates, and the dashboard UI
   (watchlist, navigation shell, Settings) are all hardware-validated
-- Phases 12-13 (host-side test hardening, portfolio polish) not started
+- Phase 12 done: host-side tests were already comprehensive going in;
+  added CI static analysis (cppcheck blocking, clang-format report-only)
+  and a documented host-testable-module audit
+- Phase 13 (portfolio polish) not started
 
 ## Phases
 
@@ -317,12 +320,39 @@ Acceptance criteria:
       `docs/validation/dashboard-ui-hardware-test.md`
 
 ### Phase 12: Host-side tests + CI hardening
-Status: Planned
+Status: Done
+
+Scope: this phase turned out not to be greenfield - by the time it was
+picked up, 7 components already had host tests (~25 test files, ~360
+assertions) covering every parser and state machine in the codebase, wired
+into CI's `host-tests` job. The real net-new work was CI hardening (static
+analysis was completely absent) and a documented audit of which modules
+are host-testable and why the rest aren't, so that claim is verifiable
+rather than assumed - see `docs/testing.md`.
+
+Delivery plan:
+1. CI: cppcheck (blocking, scoped to the same pure-logic files host tests
+   already compile) + clang-format (report-only, no `.clang-format` existed
+   before so a full-tree reformat diff hasn't been reviewed) - **Done**
+2. Docs: host-testable module audit in `docs/testing.md` + this Phase 12
+   closeout - **Done**
 
 Acceptance criteria:
-- [ ] Host-testable modules identified
-- [ ] Parser/state machine tests added
-- [ ] CI runs host-side unit tests on push/PR
+- [x] Host-testable modules identified - see the "Host-tested (pure
+      logic)" / "Not host-tested, and why" split in `docs/testing.md`;
+      every non-test-covered file was checked individually for separable
+      pure logic
+- [x] Parser/state machine tests added - already true going into this
+      phase (every parser and state machine in the codebase has host
+      tests); no net-new test files were needed, so none were added just
+      to pad the checklist
+- [x] CI runs host-side unit tests on push/PR - already true (`host-tests`
+      job in `.github/workflows/build.yml`), formally closed out here;
+      this phase additionally added `cppcheck` (blocking) and
+      `format-check` (non-blocking, report-only) jobs
+- Explicitly deferred: automated secrets-scanning in CI (AGENTS.md
+  mentions it; today it's a manual PR-checklist item only) - out of scope
+  for this phase, candidate for a future `chore/*` slice
 
 ### Phase 13: Portfolio polish
 Status: Planned
