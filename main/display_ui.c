@@ -283,6 +283,18 @@ static lv_obj_t *s_updates_action_label;
 
 static lv_obj_t *s_about_screen;
 
+// --- First-run-after-update disclaimer screen ---
+//
+// Full-screen, non-dismissible-without-Accept modal shown once per firmware
+// version (settings_disclaimer_should_show(), settings_store's disclaimer
+// domain) - see display_ui_render(), which shows this instead of the
+// dashboard when gated. Built as its own lv_screen (loaded in place of the
+// dashboard, then swapped back on Accept) so it stays a normal
+// lv_screen_active() target - capturable by the "screenshot" dev console
+// command the same way every other screen is.
+static lv_obj_t *s_dashboard_screen; // the screen display_ui_render() builds everything else onto
+static lv_obj_t *s_disclaimer_screen;
+
 // Reused scratch buffers: avoids per-tick dynamic allocation (AGENTS.md: no
 // dynamic allocation in the hot path) and avoids putting
 // sizeof(market_data_kline_t) * APP_STATE_KLINE_CAPACITY (~25KB) on the LVGL
@@ -4881,9 +4893,113 @@ static void build_locale_screen(lv_obj_t *screen)
     build_nav_row(s_locale_screen, "Region", region_nav_row_click_cb, NULL);
 }
 
+// Persists the running firmware version as acknowledged, then switches to
+// the dashboard and tears down the now-inactive disclaimer screen - the
+// only way off this screen (no back/skip control).
+static void disclaimer_accept_cb(lv_event_t *e)
+{
+    (void)e;
+
+    const esp_app_desc_t *running = esp_app_get_description();
+    disclaimer_settings_t cfg;
+    settings_disclaimer_init_default(&cfg);
+    strncpy(cfg.acked_fw_version, running->version, SETTINGS_ACKED_FW_VERSION_MAX_LEN);
+    settings_store_save_disclaimer(&cfg);
+
+    lv_screen_load(s_dashboard_screen);
+    if (s_disclaimer_screen != NULL)
+    {
+        lv_obj_delete(s_disclaimer_screen);
+        s_disclaimer_screen = NULL;
+    }
+}
+
+// Builds the first-run disclaimer as its own screen object (not yet
+// loaded). Built once in display_ui_render() regardless of whether it will
+// actually be shown this boot - display_ui_render() decides that via
+// settings_disclaimer_should_show().
+static void build_disclaimer_screen(void)
+{
+    s_disclaimer_screen = lv_obj_create(NULL);
+    lv_obj_set_style_bg_color(s_disclaimer_screen, COLOR_INK, 0);
+    lv_obj_set_style_bg_opa(s_disclaimer_screen, LV_OPA_COVER, 0);
+    lv_obj_set_flex_flow(s_disclaimer_screen, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_all(s_disclaimer_screen, 24, 0);
+    lv_obj_set_style_pad_row(s_disclaimer_screen, 14, 0);
+
+    lv_obj_t *title = lv_label_create(s_disclaimer_screen);
+    lv_obj_set_style_text_color(title, COLOR_TEXT, 0);
+    lv_obj_set_style_text_font(title, &lv_font_montserrat_20, 0);
+    lv_label_set_text(title, "Before you start");
+
+    lv_obj_t *intro = lv_label_create(s_disclaimer_screen);
+    lv_obj_set_style_text_color(intro, COLOR_TEXT, 0);
+    lv_obj_set_style_text_font(intro, &lv_font_montserrat_14, 0);
+    lv_obj_set_width(intro, LV_PCT(100));
+    lv_label_set_long_mode(intro, LV_LABEL_LONG_WRAP);
+    lv_label_set_text(intro, "This is a free, open-source project provided for informational and "
+                              "educational purposes only.");
+
+    static const char *const s_disclaimer_bullets[] = {
+        "Market data is provided by Binance and may be delayed, incomplete, or inaccurate.",
+        "Nothing shown here is financial, investment, or trading advice.",
+        "Do not rely on this device for trading decisions - always verify prices on the "
+        "official exchange.",
+        "The software is provided \"as is\", without warranty of any kind. Use at your own risk.",
+    };
+    for (size_t i = 0; i < sizeof(s_disclaimer_bullets) / sizeof(s_disclaimer_bullets[0]); i++)
+    {
+        lv_obj_t *bullet_row = lv_obj_create(s_disclaimer_screen);
+        lv_obj_remove_style_all(bullet_row);
+        make_plain_container(bullet_row);
+        lv_obj_set_size(bullet_row, LV_PCT(100), LV_SIZE_CONTENT);
+        lv_obj_set_flex_flow(bullet_row, LV_FLEX_FLOW_ROW);
+        lv_obj_set_style_pad_column(bullet_row, 8, 0);
+
+        lv_obj_t *bullet_glyph = lv_label_create(bullet_row);
+        lv_obj_set_style_text_color(bullet_glyph, COLOR_MUTED, 0);
+        lv_obj_set_style_text_font(bullet_glyph, &lv_font_montserrat_12, 0);
+        lv_label_set_text(bullet_glyph, LV_SYMBOL_BULLET);
+
+        lv_obj_t *bullet_text = lv_label_create(bullet_row);
+        lv_obj_set_style_text_color(bullet_text, COLOR_MUTED, 0);
+        lv_obj_set_style_text_font(bullet_text, &lv_font_montserrat_12, 0);
+        lv_obj_set_flex_grow(bullet_text, 1);
+        lv_label_set_long_mode(bullet_text, LV_LABEL_LONG_WRAP);
+        lv_label_set_text(bullet_text, s_disclaimer_bullets[i]);
+    }
+
+    // Accent CTA button, same style as the Watchlist Add screen's "Add to
+    // watchlist" button (build_watchlist_add_screen()) - the one place a
+    // full-width accent button is used elsewhere in this codebase.
+    lv_obj_t *accept_button = lv_button_create(s_disclaimer_screen);
+    lv_obj_remove_style_all(accept_button);
+    make_plain_container(accept_button);
+    lv_obj_add_flag(accept_button, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_size(accept_button, LV_PCT(100), 44);
+    lv_obj_set_style_margin_top(accept_button, 10, 0);
+    lv_obj_set_style_radius(accept_button, 9, 0);
+    lv_obj_set_style_bg_color(accept_button, COLOR_ACCENT, 0);
+    lv_obj_set_style_bg_opa(accept_button, LV_OPA_COVER, 0);
+    lv_obj_set_flex_flow(accept_button, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(accept_button, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_add_event_cb(accept_button, disclaimer_accept_cb, LV_EVENT_CLICKED, NULL);
+
+    lv_obj_t *accept_label = lv_label_create(accept_button);
+    lv_obj_set_style_text_color(accept_label, lv_color_hex(0x04141C), 0);
+    lv_obj_set_style_text_font(accept_label, &lv_font_montserrat_14, 0);
+    lv_label_set_text(accept_label, "Accept");
+}
+
+static void show_disclaimer_screen(void)
+{
+    lv_screen_load(s_disclaimer_screen);
+}
+
 static void display_ui_render(void)
 {
     lv_obj_t *screen = lv_screen_active();
+    s_dashboard_screen = screen;
     lv_obj_set_style_bg_color(screen, COLOR_INK, 0);
     lv_obj_set_style_bg_opa(screen, LV_OPA_COVER, 0);
     lv_obj_set_style_text_color(screen, COLOR_TEXT, 0);
@@ -4917,6 +5033,18 @@ static void display_ui_render(void)
     // not have run yet when this is called - rebuild_rows_if_needed() picks
     // the watchlist up on whichever tick first sees it loaded.
     s_update_timer = lv_timer_create(update_timer_cb, UPDATE_PERIOD_MS, NULL);
+
+    // Built regardless of whether it's shown this boot (cheap, and needed
+    // the instant the should-show check below says yes).
+    build_disclaimer_screen();
+
+    disclaimer_settings_t saved;
+    settings_store_load_disclaimer(&saved);
+    const esp_app_desc_t *running = esp_app_get_description();
+    if (settings_disclaimer_should_show(saved.acked_fw_version, running->version))
+    {
+        show_disclaimer_screen();
+    }
 }
 
 esp_err_t display_ui_start(void)
@@ -5027,6 +5155,23 @@ static int cmd_nav(int argc, char **argv)
     {
         set_active_screen(DISPLAY_UI_SCREEN_SETTINGS);
         show_settings_view(SETTINGS_VIEW_ABOUT);
+    }
+    else if (strcmp(target, "disclaimer") == 0)
+    {
+        // Not a Settings sub-view like the targets above - its own
+        // lv_screen (see build_disclaimer_screen()), loaded directly.
+        // "disclaimer accept" instead simulates tapping Accept, the same
+        // way "wifi_password" above simulates reaching that screen without
+        // a real connect attempt - lets tools/dev_screenshot.py --nav
+        // verify the persist-and-dismiss flow with no physical tap.
+        if (argc >= 3 && strcmp(argv[2], "accept") == 0)
+        {
+            disclaimer_accept_cb(NULL);
+        }
+        else
+        {
+            show_disclaimer_screen();
+        }
     }
     else if (strcmp(target, "time") == 0)
     {
