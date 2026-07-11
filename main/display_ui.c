@@ -131,6 +131,7 @@ static lv_obj_t *s_time_zone_city_screen;
 static lv_obj_t *s_time_zone_city_list;
 static lv_obj_t *s_time_zone_city_subtitle;
 static lv_obj_t *s_region_screen;
+static lv_obj_t *s_region_subtitle;
 static lv_obj_t *s_region_check_auto;
 static lv_obj_t *s_region_check_intl;
 static lv_obj_t *s_region_check_us;
@@ -4706,6 +4707,13 @@ static void region_refresh_marks(void)
             lv_obj_add_flag(checks[i], LV_OBJ_FLAG_HIDDEN);
         }
     }
+
+    // "Automatic" alone doesn't say which host that currently resolves to -
+    // spell it out, since that's exactly the detail Phase 13 exists to get
+    // right silently in the background.
+    const char *resolved = (cfg.region == SETTINGS_API_REGION_US) ? "United States (Binance.US)"
+                                                                    : "International (Binance.com)";
+    lv_label_set_text_fmt(s_region_subtitle, "Currently: %s", resolved);
 }
 
 // user_data: 0 = Automatic, 1 = International, 2 = United States.
@@ -4735,7 +4743,8 @@ static void region_nav_row_click_cb(lv_event_t *e)
 
 static void build_region_screen(lv_obj_t *screen)
 {
-    lv_obj_t *body = build_time_subscreen(screen, &s_region_screen, "Region", NULL, NULL, region_back_cb);
+    lv_obj_t *body =
+        build_time_subscreen(screen, &s_region_screen, "Region", "", &s_region_subtitle, region_back_cb);
 
     build_time_toggle_row(body, "Automatic", region_row_click_cb, (void *)(uintptr_t)0, &s_region_check_auto);
     build_time_toggle_row(body, "International (Binance.com)", region_row_click_cb, (void *)(uintptr_t)1,
