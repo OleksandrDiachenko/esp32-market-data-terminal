@@ -83,6 +83,7 @@ typedef enum
     SETTINGS_VIEW_WATCHLIST_MANAGE,
     SETTINGS_VIEW_WATCHLIST_ADD,
     SETTINGS_VIEW_UPDATES,
+    SETTINGS_VIEW_ABOUT,
 } settings_view_t;
 
 // One LVGL row per watchlist symbol. Built once per (re)load of the
@@ -277,6 +278,10 @@ static lv_obj_t *s_updates_progress_label;
 // "Checking..." while a check is in flight - see updates_action_cb().
 static lv_obj_t *s_updates_action_button;
 static lv_obj_t *s_updates_action_label;
+
+// --- About (Settings > About) ---
+
+static lv_obj_t *s_about_screen;
 
 // Reused scratch buffers: avoids per-tick dynamic allocation (AGENTS.md: no
 // dynamic allocation in the hot path) and avoids putting
@@ -633,6 +638,7 @@ static void show_settings_view(settings_view_t view)
     lv_obj_add_flag(s_watchlist_manage_screen, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(s_watchlist_add_screen, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(s_updates_screen, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(s_about_screen, LV_OBJ_FLAG_HIDDEN);
 
     lv_obj_t *target = s_settings_list;
     switch (view)
@@ -670,6 +676,9 @@ static void show_settings_view(settings_view_t view)
     case SETTINGS_VIEW_UPDATES:
         target = s_updates_screen;
         break;
+    case SETTINGS_VIEW_ABOUT:
+        target = s_about_screen;
+        break;
     default:
         break;
     }
@@ -695,6 +704,7 @@ static void set_active_screen(display_ui_screen_t screen)
         lv_obj_add_flag(s_watchlist_manage_screen, LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(s_watchlist_add_screen, LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(s_updates_screen, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(s_about_screen, LV_OBJ_FLAG_HIDDEN);
         lv_label_set_text(s_nav_label, "SETTINGS");
     }
     else
@@ -3606,6 +3616,80 @@ static void build_updates_screen(lv_obj_t *screen)
     lv_label_set_text(s_updates_action_label, LV_SYMBOL_REFRESH " Check for updates");
 }
 
+static void about_back_cb(lv_event_t *e)
+{
+    (void)e;
+    show_settings_view(SETTINGS_VIEW_LIST);
+}
+
+// Static content built once - firmware version is read at build time and
+// never changes without a reboot, so unlike the Updates screen there is no
+// per-entry reset function.
+static void build_about_screen(lv_obj_t *screen)
+{
+    s_about_screen = lv_obj_create(screen);
+    lv_obj_remove_style_all(s_about_screen);
+    make_plain_container(s_about_screen);
+    lv_obj_set_size(s_about_screen, LV_PCT(100), BOARD_JC4880P443C_LCD_V_RES - STATUSBAR_HEIGHT_PX);
+    lv_obj_set_flex_flow(s_about_screen, LV_FLEX_FLOW_COLUMN);
+
+    build_subscreen_header(s_about_screen, "About", NULL, about_back_cb);
+
+    lv_obj_t *content = lv_obj_create(s_about_screen);
+    lv_obj_remove_style_all(content);
+    make_plain_container(content);
+    lv_obj_set_size(content, LV_PCT(100), LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(content, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_left(content, 20, 0);
+    lv_obj_set_style_pad_right(content, 20, 0);
+    lv_obj_set_style_pad_top(content, 16, 0);
+    lv_obj_set_style_pad_row(content, 6, 0);
+
+    lv_obj_t *name_label = lv_label_create(content);
+    lv_obj_set_style_text_color(name_label, COLOR_TEXT, 0);
+    lv_obj_set_style_text_font(name_label, &lv_font_montserrat_18, 0);
+    lv_label_set_text(name_label, "ESP32 Market Data Terminal");
+
+    const esp_app_desc_t *running = esp_app_get_description();
+    lv_obj_t *version_label = lv_label_create(content);
+    lv_obj_set_style_text_color(version_label, COLOR_MUTED, 0);
+    lv_obj_set_style_text_font(version_label, &lv_font_montserrat_12, 0);
+    lv_label_set_text_fmt(version_label, "Firmware v%s", running->version);
+
+    lv_obj_t *license_label = lv_label_create(content);
+    lv_obj_set_style_text_color(license_label, COLOR_MUTED, 0);
+    lv_obj_set_style_text_font(license_label, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_margin_top(license_label, 8, 0);
+    lv_label_set_text(license_label, "Open Source - Apache License 2.0");
+
+    lv_obj_t *attribution_label = lv_label_create(content);
+    lv_obj_set_style_text_color(attribution_label, COLOR_MUTED, 0);
+    lv_obj_set_style_text_font(attribution_label, &lv_font_montserrat_12, 0);
+    lv_label_set_text(attribution_label, "Market data by Binance");
+
+    lv_obj_t *divider = lv_obj_create(content);
+    lv_obj_remove_style_all(divider);
+    lv_obj_set_size(divider, LV_PCT(100), 1);
+    lv_obj_set_style_bg_color(divider, COLOR_HAIRLINE, 0);
+    lv_obj_set_style_bg_opa(divider, LV_OPA_COVER, 0);
+    lv_obj_set_style_margin_top(divider, 14, 0);
+    lv_obj_set_style_margin_bottom(divider, 2, 0);
+
+    // Same informational disclaimer body the first-run disclaimer modal
+    // shows (Phase 14 slice 4) - reachable here at any time from Settings,
+    // not just once on first boot after an update.
+    lv_obj_t *disclaimer_label = lv_label_create(content);
+    lv_obj_set_style_text_color(disclaimer_label, COLOR_MUTED, 0);
+    lv_obj_set_style_text_font(disclaimer_label, &lv_font_montserrat_12, 0);
+    lv_obj_set_width(disclaimer_label, LV_PCT(100));
+    lv_label_set_long_mode(disclaimer_label, LV_LABEL_LONG_WRAP);
+    lv_label_set_text(disclaimer_label,
+                       "Market data is provided by Binance and may be delayed, incomplete, or "
+                       "inaccurate. Nothing shown here is financial, investment, or trading "
+                       "advice - always verify prices on the official exchange. The software "
+                       "is provided \"as is\", without warranty of any kind.");
+}
+
 static void locale_row_click_cb(lv_event_t *e)
 {
     (void)e;
@@ -3617,6 +3701,12 @@ static void watchlist_row_click_cb(lv_event_t *e)
     (void)e;
     watchlist_manage_rebuild();
     show_settings_view(SETTINGS_VIEW_WATCHLIST_MANAGE);
+}
+
+static void about_row_click_cb(lv_event_t *e)
+{
+    (void)e;
+    show_settings_view(SETTINGS_VIEW_ABOUT);
 }
 
 static void build_settings_list(lv_obj_t *screen)
@@ -3655,6 +3745,10 @@ static void build_settings_list(lv_obj_t *screen)
         build_settings_row(s_settings_list, LV_SYMBOL_LIST, "Watchlist symbols", "--", watchlist_row_click_cb);
     s_settings_updates_row_desc =
         build_settings_row(s_settings_list, LV_SYMBOL_DOWNLOAD, "Updates", "--", updates_row_click_cb);
+    // Static description, not a live-updated label like the rows above -
+    // doubles as a passive Binance data attribution visible right on the
+    // Settings list, without needing to enter the About screen.
+    build_settings_row(s_settings_list, LV_SYMBOL_HOME, "About", "Market data by Binance", about_row_click_cb);
 }
 
 // --- Settings > Time > Date format ---
@@ -4813,6 +4907,7 @@ static void display_ui_render(void)
     build_watchlist_manage_screen(screen);
     build_watchlist_add_screen(screen);
     build_updates_screen(screen);
+    build_about_screen(screen);
     build_statusbar(screen);
 
     set_active_screen(DISPLAY_UI_SCREEN_WATCHLIST);
@@ -4927,6 +5022,11 @@ static int cmd_nav(int argc, char **argv)
         set_active_screen(DISPLAY_UI_SCREEN_SETTINGS);
         updates_screen_reset();
         show_settings_view(SETTINGS_VIEW_UPDATES);
+    }
+    else if (strcmp(target, "about") == 0)
+    {
+        set_active_screen(DISPLAY_UI_SCREEN_SETTINGS);
+        show_settings_view(SETTINGS_VIEW_ABOUT);
     }
     else if (strcmp(target, "time") == 0)
     {
