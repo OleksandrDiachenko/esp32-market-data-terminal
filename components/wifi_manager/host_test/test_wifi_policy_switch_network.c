@@ -165,6 +165,42 @@ static void test_connect_new_while_idle_connects_immediately(void)
     CHECK(!wifi_policy_is_teardown_pending(&p));
 }
 
+// Switching targets again while a manual connect is still in flight (state
+// CONNECTING, not yet CONNECTED - e.g. the user taps a second network before
+// the first attempt resolves) must also defer via teardown, not stack a new
+// esp_wifi_connect() on top of the still-live one. The adapter no longer
+// disconnects on our behalf before every connect (see wifi_manager.c
+// execute_connect), so the policy must ask for it explicitly here too.
+static void test_connect_new_while_connecting_defers_connect(void)
+{
+    wifi_policy_t p;
+    wifi_policy_config_t cfg = default_config();
+    wifi_policy_init(&p, &cfg);
+    wifi_policy_set_profiles(&p, NULL, 0, NULL);
+
+    wifi_policy_action_t actions[WIFI_POLICY_MAX_ACTIONS];
+    wifi_policy_input_t connect_a = {.kind = WIFI_POLICY_IN_CMD_CONNECT_NEW};
+    strncpy(connect_a.ssid, "A", WIFI_POLICY_SSID_MAX);
+    wifi_policy_handle(&p, &connect_a, actions, WIFI_POLICY_MAX_ACTIONS);
+    CHECK(wifi_policy_state(&p) == WIFI_POLICY_STATE_CONNECTING);
+    CHECK(!wifi_policy_is_teardown_pending(&p));
+
+    wifi_policy_input_t connect_b = {.kind = WIFI_POLICY_IN_CMD_CONNECT_NEW};
+    strncpy(connect_b.ssid, "B", WIFI_POLICY_SSID_MAX);
+    uint8_t n = wifi_policy_handle(&p, &connect_b, actions, WIFI_POLICY_MAX_ACTIONS);
+
+    CHECK(has_action(actions, n, WIFI_POLICY_ACT_DISCONNECT, NULL));
+    CHECK(!has_action(actions, n, WIFI_POLICY_ACT_CONNECT, NULL));
+    CHECK(wifi_policy_is_teardown_pending(&p));
+    CHECK(wifi_policy_state(&p) == WIFI_POLICY_STATE_CONNECTING);
+    CHECK_STREQ(p.current_ssid, "B");
+
+    wifi_policy_input_t teardown_done = {.kind = WIFI_POLICY_IN_TEARDOWN_DISCONNECTED};
+    n = wifi_policy_handle(&p, &teardown_done, actions, WIFI_POLICY_MAX_ACTIONS);
+    CHECK(has_action(actions, n, WIFI_POLICY_ACT_CONNECT, "B"));
+    CHECK(!wifi_policy_is_teardown_pending(&p));
+}
+
 int main(void)
 {
     test_connect_new_while_connected_defers_connect();
@@ -172,5 +208,6 @@ int main(void)
     test_teardown_disconnected_noop_when_not_pending();
     test_connect_timeout_while_teardown_pending_resolves();
     test_connect_new_while_idle_connects_immediately();
+    test_connect_new_while_connecting_defers_connect();
     return test_summary("wifi_policy_switch_network");
 }

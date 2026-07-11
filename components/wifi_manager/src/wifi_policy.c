@@ -400,7 +400,12 @@ uint8_t wifi_policy_handle(wifi_policy_t *p, const wifi_policy_input_t *in, wifi
 
     case WIFI_POLICY_IN_CMD_CONNECT_NEW:
     {
-        bool needs_teardown = (p->state == WIFI_POLICY_STATE_CONNECTED);
+        // CONNECTING also needs an explicit teardown: a live esp_wifi_connect()
+        // may already be in flight for the old target, and the adapter no
+        // longer disconnects on our behalf before every connect - only what
+        // we explicitly ask for via ACT_DISCONNECT.
+        bool needs_teardown =
+            (p->state == WIFI_POLICY_STATE_CONNECTED || p->state == WIFI_POLICY_STATE_CONNECTING);
         if (needs_teardown)
         {
             copy_ssid(p->fallback_ssid, p->current_ssid);
@@ -439,7 +444,8 @@ uint8_t wifi_policy_handle(wifi_policy_t *p, const wifi_policy_input_t *in, wifi
             }
         }
         {
-            bool needs_teardown = (p->state == WIFI_POLICY_STATE_CONNECTED);
+            bool needs_teardown =
+                (p->state == WIFI_POLICY_STATE_CONNECTED || p->state == WIFI_POLICY_STATE_CONNECTING);
             if (needs_teardown)
             {
                 n = emit(out, max_out, n, act_disconnect());

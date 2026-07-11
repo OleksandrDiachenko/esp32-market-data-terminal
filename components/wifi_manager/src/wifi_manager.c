@@ -483,7 +483,12 @@ static void execute_connect(const char *ssid, wifi_policy_origin_t origin)
     wifi_config.sta.threshold.authmode = have_password ? WIFI_AUTH_WPA2_PSK : WIFI_AUTH_OPEN;
     memset(password, 0, sizeof(password));
 
-    esp_wifi_disconnect(); // best-effort clear any prior association
+    // No esp_wifi_disconnect() here: any teardown of a prior association is
+    // the policy's decision, issued explicitly as ACT_DISCONNECT before this
+    // ACT_CONNECT is emitted (see WIFI_POLICY_IN_CMD_CONNECT_NEW/_SAVED).
+    // Disconnecting unconditionally on every connect races the SDIO-hosted
+    // co-processor: the resulting async STA_DISCONNECTED can land after this
+    // attempt is already CONNECTING and get misread as this attempt failing.
 
     esp_err_t ret = esp_wifi_set_config(WIFI_IF_STA, &wifi_config);
     memset(&wifi_config, 0, sizeof(wifi_config));
@@ -697,6 +702,60 @@ static void sanitize_profile_db(void)
     }
 }
 
+// Mirrors wifi_policy.c's WIFI_POLICY_REASON_* mirror of wifi_err_reason_t
+// (esp_wifi_types.h) - catches drift between the two at compile time.
+_Static_assert(WIFI_REASON_AUTH_EXPIRE == 2, "wifi_err_reason_t drift: AUTH_EXPIRE");
+_Static_assert(WIFI_REASON_MIC_FAILURE == 14, "wifi_err_reason_t drift: MIC_FAILURE");
+_Static_assert(WIFI_REASON_4WAY_HANDSHAKE_TIMEOUT == 15, "wifi_err_reason_t drift: 4WAY_HANDSHAKE_TIMEOUT");
+_Static_assert(WIFI_REASON_NO_AP_FOUND == 201, "wifi_err_reason_t drift: NO_AP_FOUND");
+_Static_assert(WIFI_REASON_AUTH_FAIL == 202, "wifi_err_reason_t drift: AUTH_FAIL");
+_Static_assert(WIFI_REASON_HANDSHAKE_TIMEOUT == 204, "wifi_err_reason_t drift: HANDSHAKE_TIMEOUT");
+
+static const char *disconnect_reason_str(uint8_t reason)
+{
+    switch (reason)
+    {
+    case WIFI_REASON_UNSPECIFIED:
+        return "UNSPECIFIED";
+    case WIFI_REASON_AUTH_EXPIRE:
+        return "AUTH_EXPIRE";
+    case WIFI_REASON_AUTH_LEAVE:
+        return "AUTH_LEAVE";
+    case WIFI_REASON_ASSOC_LEAVE:
+        return "ASSOC_LEAVE";
+    case WIFI_REASON_MIC_FAILURE:
+        return "MIC_FAILURE";
+    case WIFI_REASON_4WAY_HANDSHAKE_TIMEOUT:
+        return "4WAY_HANDSHAKE_TIMEOUT";
+    case WIFI_REASON_GROUP_KEY_UPDATE_TIMEOUT:
+        return "GROUP_KEY_UPDATE_TIMEOUT";
+    case WIFI_REASON_802_1X_AUTH_FAILED:
+        return "802_1X_AUTH_FAILED";
+    case WIFI_REASON_TIMEOUT:
+        return "TIMEOUT";
+    case WIFI_REASON_BEACON_TIMEOUT:
+        return "BEACON_TIMEOUT";
+    case WIFI_REASON_NO_AP_FOUND:
+        return "NO_AP_FOUND";
+    case WIFI_REASON_AUTH_FAIL:
+        return "AUTH_FAIL";
+    case WIFI_REASON_ASSOC_FAIL:
+        return "ASSOC_FAIL";
+    case WIFI_REASON_HANDSHAKE_TIMEOUT:
+        return "HANDSHAKE_TIMEOUT";
+    case WIFI_REASON_CONNECTION_FAIL:
+        return "CONNECTION_FAIL";
+    case WIFI_REASON_NO_AP_FOUND_W_COMPATIBLE_SECURITY:
+        return "NO_AP_FOUND_W_COMPATIBLE_SECURITY";
+    case WIFI_REASON_NO_AP_FOUND_IN_AUTHMODE_THRESHOLD:
+        return "NO_AP_FOUND_IN_AUTHMODE_THRESHOLD";
+    case WIFI_REASON_NO_AP_FOUND_IN_RSSI_THRESHOLD:
+        return "NO_AP_FOUND_IN_RSSI_THRESHOLD";
+    default:
+        return "OTHER";
+    }
+}
+
 static void handle_started(void)
 {
     bool store_ok = false;
@@ -729,6 +788,8 @@ static void handle_cmd(const wifi_mgr_cmd_t *cmd)
     case CMD_WIFI_DISCONNECTED:
     {
         wifi_policy_state_t pstate = wifi_policy_state(&policy);
+        ESP_LOGW(TAG, "Wi-Fi disconnected: reason=%u (%s), policy_state=%d", (unsigned)cmd->disconnect_reason,
+                 disconnect_reason_str(cmd->disconnect_reason), (int)pstate);
         if (wifi_policy_is_teardown_pending(&policy))
         {
             // This disconnect is the (async) teardown of the previously
