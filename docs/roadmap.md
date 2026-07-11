@@ -12,7 +12,9 @@ Build an ESP-IDF based ESP32-P4 market data terminal as a professional embedded 
 - Phase 12 done: host-side tests were already comprehensive going in;
   added CI static analysis (cppcheck blocking, clang-format report-only)
   and a documented host-testable-module audit
-- Phase 13 (portfolio polish) not started
+- Phase 13 (regional server auto-selection) not started
+- Phase 14 (branding, licensing & Binance data-usage compliance) not started
+- Phase 15 (portfolio polish, renumbered from 13) not started
 
 ## Phases
 
@@ -354,7 +356,135 @@ Acceptance criteria:
   mentions it; today it's a manual PR-checklist item only) - out of scope
   for this phase, candidate for a future `chore/*` slice
 
-### Phase 13: Portfolio polish
+### Phase 13: Regional server auto-selection
+Status: Planned
+
+Scope: derive the Binance REST/WS host from the user's selected time zone
+instead of relying on a manual region toggle - pick Binance.US
+(`api.binance.us` / `stream.binance.us`,
+`SETTINGS_API_REGION_US`) for any time zone that belongs to United States
+territory, Binance.com (`SETTINGS_API_REGION_INTL`) for everyone else.
+Regulatory driver: Binance.com is not available to U.S. persons, so a U.S.
+user must be steered to Binance.US automatically rather than having to know
+to flip a setting. Builds on the already-separate `api_region_settings_t`
+domain ([settings_codec.h](../components/settings_store/include/settings_codec.h))
+and the `tz_label` ("Zone/City") already stored in `locale_settings_t`.
+
+Open design questions (to resolve in the ADR before coding):
+- The definitive set of U.S. time zones: the 50 states + D.C. plus U.S.
+  territories (Puerto Rico, Guam, U.S. Virgin Islands, American Samoa,
+  Northern Mariana Islands). `America/*` alone is wrong (it also covers
+  Canada / Mexico / Central & South America), so the mapping must be an
+  explicit allow-list of `tz_label`s, maintained next to the existing
+  time-zone city tables in `display_ui.c`.
+- Auto vs. manual: auto-set the region when the time zone changes, but keep
+  a manual override afterward (user may deliberately be a non-U.S. person on
+  a U.S. clock, or vice-versa). Needs a "region source" flag
+  (auto/manual) so a manual choice isn't silently re-overwritten on the next
+  time-zone edit.
+- Symbol-universe mismatch: Binance.US lists fewer pairs than Binance.com;
+  a switch to US may leave watchlist symbols that don't exist there.
+  Decide surfacing (per-symbol "unavailable in this region" state, reusing
+  the existing per-symbol error state) - no silent data gaps.
+- A region switch must force a full resync + WebSocket resubscribe (same
+  path as the Phase 8/9 resync), since the underlying host changed.
+
+Acceptance criteria:
+- [ ] ADR documenting the U.S.-territory `tz_label` allow-list, the
+      auto/manual region-source flag, and the resync-on-switch behavior
+- [ ] Region is auto-selected from the selected time zone (U.S. zone ->
+      `SETTINGS_API_REGION_US`, otherwise `SETTINGS_API_REGION_INTL`)
+- [ ] Manual override is preserved across subsequent time-zone edits
+      (region-source flag), host-tested
+- [ ] Switching region forces a resync + WS resubscribe; no stale data from
+      the previous host
+- [ ] Symbols unavailable on the active region surface a visible per-symbol
+      state, not a silent gap
+- [ ] Host tests cover the tz_label -> region mapping (U.S. states,
+      territories, and non-U.S. `America/*` negatives)
+- [ ] Validated on real hardware: pick a U.S. zone -> data comes from
+      Binance.US; pick a non-U.S. zone -> data comes from Binance.com
+
+### Phase 14: Branding, licensing & data-usage compliance
+Status: Planned
+
+Scope: the legal / first-run / branding layer that a portfolio-facing build
+needs before it is shown publicly - an OSI license for the code, a SISWOOD
+boot screen, visible Binance data attribution, and a one-time
+disclaimer shown on first boot after a firmware update. All four share the
+same new "first-run / branding" surface (boot screen + an NVS
+"acknowledged disclaimer version" flag), so they are one phase delivered as
+slices, not four phases.
+
+Note on scope boundary: the code license (Apache-2.0) is independent of
+Binance's Terms of Use for the *data*. Binance's one hard restriction is
+that you may not charge for or otherwise profit from (ads, referral fees)
+market data pulled from their API - satisfied automatically by a free,
+non-commercial open-source build. The attribution + disclaimer slices are
+best-practice compliance and honesty to the user, not a hard technical
+mandate from Binance.
+
+Delivery plan (PR-per-slice, this checklist is the combined Definition of
+Done):
+1. LICENSE - add an Apache License 2.0 `LICENSE` file at repo root
+   (user's request: "something like Apache, for free personal use"),
+   add SPDX/`NOTICE` as needed, and note the Binance-data non-commercial
+   caveat in the README so the code license isn't mistaken for a data
+   license.
+2. SISWOOD boot/splash screen - a screen shown at startup before the
+   dashboard: centered "SISWOOD" wordmark, firmware version (from
+   `esp_app_desc_t.version` / `version.txt`), an "Open Source" line, and a
+   footer with the license ("Apache License 2.0") and "Market data by
+   Binance". Follow the `/dashboard-design` tokens.
+3. Binance data attribution - a persistent, non-intrusive "Market data by
+   Binance" attribution reachable from the running UI (bottom-bar /
+   Settings > About), plus an informational disclaimer entry (data may be
+   delayed/inaccurate, not financial advice).
+4. First-run-after-update disclaimer - a full-screen disclaimer shown once
+   after each firmware update (or when the disclaimer text version bumps),
+   gated by an "acknowledged disclaimer version" value in NVS; user must
+   tap Accept to reach the dashboard. Reuses the Phase 6 settings/NVS
+   pattern. Disclaimer text drafted below.
+
+Acceptance criteria:
+- [ ] `LICENSE` (Apache-2.0) at repo root; README clarifies code license vs.
+      Binance data terms (non-commercial use of the data)
+- [ ] Boot screen shows SISWOOD + firmware version + "Open Source" +
+      license/attribution footer, styled per `/dashboard-design`
+- [ ] "Market data by Binance" attribution + informational disclaimer
+      reachable from the running UI (About/Settings)
+- [ ] First-run-after-update disclaimer shown once per firmware/disclaimer
+      version, acknowledgement persisted in NVS, gates entry to the
+      dashboard
+- [ ] Disclaimer / acknowledgement-version logic host-tested (shows on
+      version change, stays hidden once acknowledged)
+- [ ] Validated on real hardware: fresh boot shows splash + disclaimer;
+      reboot without a version change skips the disclaimer; an OTA update
+      re-shows it
+
+Draft disclaimer text (slice 4, English - UI language):
+
+> **Before you start**
+>
+> SISWOOD Market Terminal is a free, open-source project provided for
+> informational and educational purposes only.
+>
+> - Market data is provided by Binance and may be delayed, incomplete, or
+>   inaccurate.
+> - Nothing shown here is financial, investment, or trading advice.
+> - Do not rely on this device for trading decisions - always verify prices
+>   on the official exchange.
+> - The software is provided "as is", without warranty of any kind. Use at
+>   your own risk.
+>
+> Tap **Accept** to continue.
+
+Draft boot-screen footer (slice 2):
+
+> SISWOOD - v{firmware_version} - Open Source
+> Licensed under Apache License 2.0 - Market data by Binance
+
+### Phase 15: Portfolio polish
 Status: Planned
 
 Acceptance criteria:
