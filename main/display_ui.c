@@ -41,7 +41,6 @@ static const char *TAG = "display_ui";
 #define TIME_LIST_ROW_HEIGHT_PX 60 // Time format / Date format / Time zones list rows
 #define WIFI_PASSWORD_FIELD_HEIGHT_PX 54 // matches the eye-toggle button below it
 #define UPDATE_PERIOD_MS 1000
-#define SPLASH_DURATION_MS 2000
 // Fixed integer range fed to lv_chart_set_axis_range()/set_series_ext_y_array().
 // Sparkline points are normalized into this range via
 // display_format_normalize_value() rather than a fixed "* 100 cents" scale,
@@ -278,17 +277,6 @@ static lv_obj_t *s_updates_progress_label;
 // "Checking..." while a check is in flight - see updates_action_cb().
 static lv_obj_t *s_updates_action_button;
 static lv_obj_t *s_updates_action_label;
-
-// --- Boot splash screen ---
-//
-// Full-screen SISWOOD wordmark + version/license/attribution footer, shown
-// as its own lv_screen (loaded in place of the dashboard at startup, then
-// swapped back) rather than an lv_layer_top() overlay - see
-// build_splash_screen()'s comment for why. Auto-dismissed by a one-shot
-// timer.
-static lv_obj_t *s_dashboard_screen; // the screen display_ui_render() builds everything else onto
-static lv_obj_t *s_splash_overlay;
-static lv_timer_t *s_splash_timer;
 
 // Reused scratch buffers: avoids per-tick dynamic allocation (AGENTS.md: no
 // dynamic allocation in the hot path) and avoids putting
@@ -4799,68 +4787,9 @@ static void build_locale_screen(lv_obj_t *screen)
     build_nav_row(s_locale_screen, "Region", region_nav_row_click_cb, NULL);
 }
 
-// One-shot: fires SPLASH_DURATION_MS after build_splash_screen()/show it,
-// switches the active screen back to the dashboard and deletes the
-// now-inactive splash screen object.
-static void splash_timer_cb(lv_timer_t *timer)
-{
-    (void)timer;
-    lv_screen_load(s_dashboard_screen);
-    if (s_splash_overlay != NULL)
-    {
-        lv_obj_delete(s_splash_overlay);
-        s_splash_overlay = NULL;
-    }
-    s_splash_timer = NULL;
-}
-
-// Builds the SISWOOD splash as its own screen object (not yet loaded) so it
-// stays a normal lv_screen_active() target - capturable by the "screenshot"
-// dev console command the same way every other screen is, unlike an overlay
-// on lv_layer_top() (which real rendering composites correctly but
-// lv_snapshot_take_to_draw_buf(lv_screen_active(), ...) in
-// dev_screenshot_console.c does not include). show_splash_screen() loads it;
-// splash_timer_cb() switches back to s_dashboard_screen after
-// SPLASH_DURATION_MS.
-static void build_splash_screen(void)
-{
-    const esp_app_desc_t *running = esp_app_get_description();
-
-    s_splash_overlay = lv_obj_create(NULL);
-    lv_obj_set_style_bg_color(s_splash_overlay, COLOR_INK, 0);
-    lv_obj_set_style_bg_opa(s_splash_overlay, LV_OPA_COVER, 0);
-    lv_obj_set_flex_flow(s_splash_overlay, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_flex_align(s_splash_overlay, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-
-    lv_obj_t *wordmark = lv_label_create(s_splash_overlay);
-    lv_obj_set_style_text_color(wordmark, COLOR_TEXT, 0);
-    lv_obj_set_style_text_font(wordmark, &lv_font_montserrat_28, 0);
-    lv_obj_set_style_text_letter_space(wordmark, 4, 0);
-    lv_label_set_text(wordmark, "SISWOOD");
-
-    lv_obj_t *footer = lv_label_create(s_splash_overlay);
-    lv_obj_set_style_text_color(footer, COLOR_MUTED, 0);
-    lv_obj_set_style_text_font(footer, &lv_font_montserrat_12, 0);
-    lv_obj_set_style_text_align(footer, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_set_style_margin_top(footer, 24, 0);
-    lv_label_set_text_fmt(footer, "v%s - Open Source\nLicensed under Apache License 2.0\nMarket data by Binance",
-                           running->version);
-}
-
-// Switches the active screen to the splash and arms its auto-dismiss timer.
-// Called last in display_ui_render(), after the dashboard is fully built, so
-// the dashboard is ready to switch back to the instant the timer fires.
-static void show_splash_screen(void)
-{
-    lv_screen_load(s_splash_overlay);
-    s_splash_timer = lv_timer_create(splash_timer_cb, SPLASH_DURATION_MS, NULL);
-    lv_timer_set_repeat_count(s_splash_timer, 1);
-}
-
 static void display_ui_render(void)
 {
     lv_obj_t *screen = lv_screen_active();
-    s_dashboard_screen = screen;
     lv_obj_set_style_bg_color(screen, COLOR_INK, 0);
     lv_obj_set_style_bg_opa(screen, LV_OPA_COVER, 0);
     lv_obj_set_style_text_color(screen, COLOR_TEXT, 0);
@@ -4893,11 +4822,6 @@ static void display_ui_render(void)
     // not have run yet when this is called - rebuild_rows_if_needed() picks
     // the watchlist up on whichever tick first sees it loaded.
     s_update_timer = lv_timer_create(update_timer_cb, UPDATE_PERIOD_MS, NULL);
-
-    // Built and shown last, once the dashboard behind it is fully ready to
-    // switch back to - see build_splash_screen()'s comment.
-    build_splash_screen();
-    show_splash_screen();
 }
 
 esp_err_t display_ui_start(void)
