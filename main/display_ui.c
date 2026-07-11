@@ -1,6 +1,7 @@
 #include "display_ui.h"
 
 #include "app_state.h"
+#include "app_state_sync_task.h"
 #include "board_jc4880p443c.h"
 #include "display_format.h"
 #include "esp_app_desc.h"
@@ -10,6 +11,7 @@
 #include "lvgl.h"
 #include "ota_client.h"
 #include "sdkconfig.h"
+#include "settings_api_region_map.h"
 #include "settings_store.h"
 #include "time_sync.h"
 #include "wifi_manager.h"
@@ -75,6 +77,7 @@ typedef enum
     SETTINGS_VIEW_DATE_FORMAT,
     SETTINGS_VIEW_TIME_ZONES,
     SETTINGS_VIEW_TIME_ZONE_CITIES,
+    SETTINGS_VIEW_REGION,
     SETTINGS_VIEW_WIFI,
     SETTINGS_VIEW_WIFI_PASSWORD,
     SETTINGS_VIEW_WATCHLIST_MANAGE,
@@ -127,6 +130,10 @@ static lv_obj_t *s_time_zone_screen;
 static lv_obj_t *s_time_zone_city_screen;
 static lv_obj_t *s_time_zone_city_list;
 static lv_obj_t *s_time_zone_city_subtitle;
+static lv_obj_t *s_region_screen;
+static lv_obj_t *s_region_check_auto;
+static lv_obj_t *s_region_check_intl;
+static lv_obj_t *s_region_check_us;
 
 // Loaded once at startup; kept up to date by the Time format/Date
 // format/Time zones screens as they save changes.
@@ -614,6 +621,7 @@ static void show_settings_view(settings_view_t view)
     lv_obj_add_flag(s_date_format_screen, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(s_time_zone_screen, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(s_time_zone_city_screen, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(s_region_screen, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(s_wifi_screen, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(s_wifi_password_screen, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(s_watchlist_manage_screen, LV_OBJ_FLAG_HIDDEN);
@@ -637,6 +645,9 @@ static void show_settings_view(settings_view_t view)
         break;
     case SETTINGS_VIEW_TIME_ZONE_CITIES:
         target = s_time_zone_city_screen;
+        break;
+    case SETTINGS_VIEW_REGION:
+        target = s_region_screen;
         break;
     case SETTINGS_VIEW_WIFI:
         target = s_wifi_screen;
@@ -672,6 +683,7 @@ static void set_active_screen(display_ui_screen_t screen)
         lv_obj_add_flag(s_date_format_screen, LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(s_time_zone_screen, LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(s_time_zone_city_screen, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(s_region_screen, LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(s_wifi_screen, LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(s_wifi_password_screen, LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(s_watchlist_manage_screen, LV_OBJ_FLAG_HIDDEN);
@@ -4534,6 +4546,8 @@ static void build_date_format_screen(lv_obj_t *screen)
 }
 
 static void time_zone_city_row_click_cb(lv_event_t *e); // defined below, used by show_time_zone_cities()
+static void apply_region_change(settings_api_region_t region,
+                                 settings_api_region_source_t source); // defined below, used by time_zone_city_row_click_cb
 
 // Rebuilds the city list for one region from scratch - cheap enough to redo
 // on every tap (at most a few dozen rows) and far simpler than moving a
@@ -4576,6 +4590,16 @@ static void time_zone_city_row_click_cb(lv_event_t *e)
     snprintf(s_locale.tz_label, sizeof(s_locale.tz_label), "%s/%s", s_tz_zone_names[entry->zone],
              s_tz_city_names[entry->city]);
     settings_store_save_locale(&s_locale);
+
+    // Auto-select the API region from the new time zone, unless the user
+    // has manually pinned one (Settings > Time > Region) - see
+    // docs/decisions/0009-regional-server-auto-selection.md.
+    api_region_settings_t region_cfg;
+    settings_store_load_api_region(&region_cfg);
+    if (region_cfg.region_source == SETTINGS_API_REGION_SOURCE_AUTO)
+    {
+        apply_region_change(settings_api_region_from_tz_label(s_locale.tz_label), SETTINGS_API_REGION_SOURCE_AUTO);
+    }
 
     // Applied immediately, not just on next boot.
     setenv("TZ", posix, 1);
@@ -4635,6 +4659,93 @@ static void time_zones_nav_row_click_cb(lv_event_t *e)
     show_settings_view(SETTINGS_VIEW_TIME_ZONES);
 }
 
+// Persists a new region/source pair (if it actually changed) and, when it
+// did, forces the same full resync + WS reconnect a Wi-Fi gap resync uses -
+// the underlying host changed, so any existing klines history came from
+// the old one. See docs/decisions/0009-regional-server-auto-selection.md.
+static void apply_region_change(settings_api_region_t region, settings_api_region_source_t source)
+{
+    api_region_settings_t cfg;
+    settings_store_load_api_region(&cfg);
+    if (cfg.region == region && cfg.region_source == source)
+    {
+        return;
+    }
+    cfg.region = region;
+    cfg.region_source = source;
+    settings_store_save_api_region(&cfg);
+    app_state_sync_task_force_resync();
+    app_state_notify_region_changed();
+}
+
+static void region_back_cb(lv_event_t *e)
+{
+    (void)e;
+    show_settings_view(SETTINGS_VIEW_LOCALE);
+}
+
+static void region_refresh_marks(void)
+{
+    api_region_settings_t cfg;
+    settings_store_load_api_region(&cfg);
+
+    bool is_auto = (cfg.region_source == SETTINGS_API_REGION_SOURCE_AUTO);
+    bool is_manual_intl = (!is_auto && cfg.region == SETTINGS_API_REGION_INTL);
+    bool is_manual_us = (!is_auto && cfg.region == SETTINGS_API_REGION_US);
+
+    lv_obj_t *checks[] = {s_region_check_auto, s_region_check_intl, s_region_check_us};
+    bool shown[] = {is_auto, is_manual_intl, is_manual_us};
+    for (size_t i = 0; i < 3; i++)
+    {
+        if (shown[i])
+        {
+            lv_obj_remove_flag(checks[i], LV_OBJ_FLAG_HIDDEN);
+        }
+        else
+        {
+            lv_obj_add_flag(checks[i], LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+}
+
+// user_data: 0 = Automatic, 1 = International, 2 = United States.
+static void region_row_click_cb(lv_event_t *e)
+{
+    uintptr_t choice = (uintptr_t)lv_event_get_user_data(e);
+    switch (choice)
+    {
+    case 0:
+        apply_region_change(settings_api_region_from_tz_label(s_locale.tz_label), SETTINGS_API_REGION_SOURCE_AUTO);
+        break;
+    case 1:
+        apply_region_change(SETTINGS_API_REGION_INTL, SETTINGS_API_REGION_SOURCE_MANUAL);
+        break;
+    default:
+        apply_region_change(SETTINGS_API_REGION_US, SETTINGS_API_REGION_SOURCE_MANUAL);
+        break;
+    }
+    region_refresh_marks();
+}
+
+static void region_nav_row_click_cb(lv_event_t *e)
+{
+    (void)e;
+    show_settings_view(SETTINGS_VIEW_REGION);
+}
+
+static void build_region_screen(lv_obj_t *screen)
+{
+    lv_obj_t *body = build_time_subscreen(screen, &s_region_screen, "Region", NULL, NULL, region_back_cb);
+
+    build_time_toggle_row(body, "Automatic", region_row_click_cb, (void *)(uintptr_t)0, &s_region_check_auto);
+    build_time_toggle_row(body, "International (Binance.com)", region_row_click_cb, (void *)(uintptr_t)1,
+                           &s_region_check_intl);
+    build_time_toggle_row(body, "United States (Binance.US)", region_row_click_cb, (void *)(uintptr_t)2,
+                           &s_region_check_us);
+
+    region_refresh_marks();
+}
+
 static void build_locale_screen(lv_obj_t *screen)
 {
     s_locale_screen = lv_obj_create(screen);
@@ -4648,6 +4759,7 @@ static void build_locale_screen(lv_obj_t *screen)
     build_nav_row(s_locale_screen, "Time format", time_format_nav_row_click_cb, NULL);
     build_nav_row(s_locale_screen, "Date format", date_format_nav_row_click_cb, NULL);
     build_nav_row(s_locale_screen, "Time zones", time_zones_nav_row_click_cb, NULL);
+    build_nav_row(s_locale_screen, "Region", region_nav_row_click_cb, NULL);
 }
 
 static void display_ui_render(void)
@@ -4670,6 +4782,7 @@ static void display_ui_render(void)
     build_date_format_screen(screen);
     build_time_zone_screen(screen);
     build_time_zone_city_screen(screen);
+    build_region_screen(screen);
     build_wifi_screen(screen);
     build_wifi_password_screen(screen);
     build_watchlist_manage_screen(screen);
@@ -4827,6 +4940,11 @@ static int cmd_nav(int argc, char **argv)
         }
         show_time_zone_cities(zone);
         show_settings_view(SETTINGS_VIEW_TIME_ZONE_CITIES);
+    }
+    else if (strcmp(target, "region") == 0)
+    {
+        set_active_screen(DISPLAY_UI_SCREEN_SETTINGS);
+        show_settings_view(SETTINGS_VIEW_REGION);
     }
     else
     {
