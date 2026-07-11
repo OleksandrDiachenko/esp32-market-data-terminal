@@ -252,6 +252,14 @@ esp_err_t board_jc4880p443c_display_start(lv_display_t **out_display)
         .hres = BOARD_JC4880P443C_LCD_H_RES,
         .vres = BOARD_JC4880P443C_LCD_V_RES,
         .monochrome = false,
+        // NOTE: with .flags.sw_rotate = true below, esp_lvgl_port never calls
+        // esp_lcd_panel_mirror()/swap_xy() at all (see
+        // lvgl_port_disp_rotation_update() in esp_lvgl_port_disp.c, which
+        // returns immediately when sw_rotate is set) - this static rotation
+        // struct is therefore dead when sw_rotate is on. 180-degree rotation
+        // is instead applied at runtime via lv_display_set_rotation() below,
+        // which drives the sw_rotate code path (lv_draw_sw_rotate) that
+        // actually flips the rendered pixel buffer.
         .rotation = {
             .swap_xy = false,
             .mirror_x = false,
@@ -282,6 +290,13 @@ esp_err_t board_jc4880p443c_display_start(lv_display_t **out_display)
         return ESP_FAIL;
     }
 
+    // 180-degree rotation (sw_rotate path - see the disp_cfg.rotation
+    // comment above). LV_DISPLAY_ROTATION_180 doesn't swap hres/vres, so no
+    // other sizing changes are needed. Touch coordinates need no matching
+    // change here - see the touch_config.flags comment in
+    // board_jc4880p443c_touch_start() below.
+    lv_display_set_rotation(display, LV_DISPLAY_ROTATION_180);
+
     *out_display = display;
     return ESP_OK;
 }
@@ -311,6 +326,16 @@ esp_err_t board_jc4880p443c_touch_start(lv_display_t *display, lv_indev_t **out_
             .reset = 0,
             .interrupt = 0,
         },
+        // NOTE: leave these at 0/0/0, even though the display above is
+        // rotated 180 degrees. lvgl_port_touchpad_read() hands LVGL raw
+        // touch-panel coordinates, and LVGL's own indev pipeline
+        // (lv_indev.c:743 -> lv_display_rotate_point(), see lv_display.c)
+        // already re-maps pointer input for the display's current
+        // lv_display_get_rotation() - for ROTATION_180 that's exactly
+        // `x' = hor_res - x - 1, y' = ver_res - y - 1`. Mirroring here too
+        // would apply that same correction twice and cancel it out (this
+        // was tried and confirmed on hardware: touch behaved as if the
+        // display were never rotated).
         .flags = {
             .swap_xy = 0,
             .mirror_x = 0,
