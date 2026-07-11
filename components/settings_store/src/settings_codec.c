@@ -173,6 +173,7 @@ void settings_api_region_init_default(api_region_settings_t *out)
     out->magic = SETTINGS_API_REGION_MAGIC;
     out->version = SETTINGS_API_REGION_VERSION;
     out->region = SETTINGS_API_REGION_INTL;
+    out->region_source = SETTINGS_API_REGION_SOURCE_AUTO;
 }
 
 void settings_api_region_seal(api_region_settings_t *db)
@@ -190,6 +191,10 @@ settings_codec_status_t settings_api_region_validate(const api_region_settings_t
         return status;
     }
     if (db->region != SETTINGS_API_REGION_INTL && db->region != SETTINGS_API_REGION_US)
+    {
+        return SETTINGS_CODEC_BAD_RANGE;
+    }
+    if (db->region_source != SETTINGS_API_REGION_SOURCE_AUTO && db->region_source != SETTINGS_API_REGION_SOURCE_MANUAL)
     {
         return SETTINGS_CODEC_BAD_RANGE;
     }

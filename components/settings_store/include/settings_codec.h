@@ -31,7 +31,7 @@ extern "C" {
 #define SETTINGS_TZ_LABEL_MAX_LEN 31 // "Zone/City", e.g. "America/Buenos Aires"
 
 #define SETTINGS_API_REGION_MAGIC 0x53415247u // 'SARG'
-#define SETTINGS_API_REGION_VERSION 1u
+#define SETTINGS_API_REGION_VERSION 2u // bumped: added region_source - see docs/decisions/0009-regional-server-auto-selection.md
 
 typedef struct
 {
@@ -85,14 +85,26 @@ typedef enum
     SETTINGS_API_REGION_US = 1,   // https://api.binance.us
 } settings_api_region_t;
 
+// Whether `region` was last set by the tz_label -> region auto-mapping
+// (see settings_api_region_map.h) or by an explicit user choice on the
+// Settings > Time > Region screen. A manual choice must not be silently
+// overwritten the next time the user picks a different time zone - see
+// docs/decisions/0009-regional-server-auto-selection.md.
+typedef enum
+{
+    SETTINGS_API_REGION_SOURCE_AUTO = 0,
+    SETTINGS_API_REGION_SOURCE_MANUAL = 1,
+} settings_api_region_source_t;
+
 typedef struct
 {
     uint32_t magic;
     uint16_t version;
     uint16_t reserved;
     uint32_t crc32;
-    uint8_t region;       // settings_api_region_t, stored fixed-width on disk
-    uint8_t reserved2[3]; // pad to 4-byte alignment
+    uint8_t region;        // settings_api_region_t, stored fixed-width on disk
+    uint8_t region_source;  // settings_api_region_source_t, stored fixed-width on disk
+    uint8_t reserved2[2];   // pad to 4-byte alignment
 } api_region_settings_t;
 
 typedef enum
