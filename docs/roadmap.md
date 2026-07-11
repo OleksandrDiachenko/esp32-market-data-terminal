@@ -15,7 +15,7 @@ Build an ESP-IDF based ESP32-P4 market data terminal as a professional embedded 
 - Phase 13 done: API region (Binance.com/.US) is now auto-derived from the
   selected time zone, with a manual override that survives later time-zone
   edits; a region switch forces a full resync + WS reconnect
-- Phase 14 (branding, licensing & Binance data-usage compliance) not started
+- Phase 14 (licensing & Binance data-usage compliance) in progress
 - Phase 15 (portfolio polish, renumbered from 13) not started
 
 ## Phases
@@ -436,16 +436,15 @@ transient/misleading 400) and a distinct "Unsupported" label separate from
 "Unavailable", with per-symbol counters reset on an actual region change -
 see the addendum in [0009](decisions/0009-regional-server-auto-selection.md).
 
-### Phase 14: Branding, licensing & data-usage compliance
+### Phase 14: Licensing & data-usage compliance
 Status: Planned
 
-Scope: the legal / first-run / branding layer that a portfolio-facing build
-needs before it is shown publicly - an OSI license for the code, a SISWOOD
-boot screen, visible Binance data attribution, and a one-time
-disclaimer shown on first boot after a firmware update. All four share the
-same new "first-run / branding" surface (boot screen + an NVS
-"acknowledged disclaimer version" flag), so they are one phase delivered as
-slices, not four phases.
+Scope: the legal / first-run compliance layer that a portfolio-facing build
+needs before it is shown publicly - an OSI license for the code, visible
+Binance data attribution, and a one-time disclaimer shown on first boot
+after a firmware update. No app-branding/wordmark screen - the disclaimer
+is the entire first-run surface, gated by an NVS "acknowledged firmware
+version" flag.
 
 Note on scope boundary: the code license (Apache-2.0) is independent of
 Binance's Terms of Use for the *data*. Binance's one hard restriction is
@@ -462,43 +461,34 @@ Done):
    add SPDX/`NOTICE` as needed, and note the Binance-data non-commercial
    caveat in the README so the code license isn't mistaken for a data
    license.
-2. SISWOOD boot/splash screen - a screen shown at startup before the
-   dashboard: centered "SISWOOD" wordmark, firmware version (from
-   `esp_app_desc_t.version` / `version.txt`), an "Open Source" line, and a
-   footer with the license ("Apache License 2.0") and "Market data by
-   Binance". Follow the `/dashboard-design` tokens.
-3. Binance data attribution - a persistent, non-intrusive "Market data by
-   Binance" attribution reachable from the running UI (bottom-bar /
-   Settings > About), plus an informational disclaimer entry (data may be
-   delayed/inaccurate, not financial advice).
-4. First-run-after-update disclaimer - a full-screen disclaimer shown once
-   after each firmware update (or when the disclaimer text version bumps),
-   gated by an "acknowledged disclaimer version" value in NVS; user must
-   tap Accept to reach the dashboard. Reuses the Phase 6 settings/NVS
-   pattern. Disclaimer text drafted below.
+2. Binance data attribution - a persistent, non-intrusive "Market data by
+   Binance" attribution reachable from the running UI (Settings > About),
+   plus an informational disclaimer entry (data may be delayed/inaccurate,
+   not financial advice).
+3. First-run-after-update disclaimer - a full-screen disclaimer shown once
+   after each firmware update, gated by an "acknowledged firmware version"
+   value in NVS; user must tap Accept to reach the dashboard. Reuses the
+   Phase 6 settings/NVS pattern. Disclaimer text drafted below.
 
 Acceptance criteria:
 - [ ] `LICENSE` (Apache-2.0) at repo root; README clarifies code license vs.
       Binance data terms (non-commercial use of the data)
-- [ ] Boot screen shows SISWOOD + firmware version + "Open Source" +
-      license/attribution footer, styled per `/dashboard-design`
 - [ ] "Market data by Binance" attribution + informational disclaimer
-      reachable from the running UI (About/Settings)
-- [ ] First-run-after-update disclaimer shown once per firmware/disclaimer
-      version, acknowledgement persisted in NVS, gates entry to the
-      dashboard
+      reachable from the running UI (Settings > About)
+- [ ] First-run-after-update disclaimer shown once per firmware version,
+      acknowledgement persisted in NVS, gates entry to the dashboard
 - [ ] Disclaimer / acknowledgement-version logic host-tested (shows on
       version change, stays hidden once acknowledged)
-- [ ] Validated on real hardware: fresh boot shows splash + disclaimer;
-      reboot without a version change skips the disclaimer; an OTA update
+- [ ] Validated on real hardware: fresh boot shows the disclaimer; reboot
+      without a version change skips it; a firmware version change
       re-shows it
 
-Draft disclaimer text (slice 4, English - UI language):
+Draft disclaimer text (slice 3, English - UI language):
 
 > **Before you start**
 >
-> SISWOOD Market Terminal is a free, open-source project provided for
-> informational and educational purposes only.
+> This is a free, open-source project provided for informational and
+> educational purposes only.
 >
 > - Market data is provided by Binance and may be delayed, incomplete, or
 >   inaccurate.
@@ -509,11 +499,6 @@ Draft disclaimer text (slice 4, English - UI language):
 >   your own risk.
 >
 > Tap **Accept** to continue.
-
-Draft boot-screen footer (slice 2):
-
-> SISWOOD - v{firmware_version} - Open Source
-> Licensed under Apache License 2.0 - Market data by Binance
 
 ### Phase 15: Portfolio polish
 Status: Planned
