@@ -24,6 +24,9 @@ esp_err_t settings_store_save_locale(locale_settings_t *cfg);
 esp_err_t settings_store_load_api_region(api_region_settings_t *out);
 esp_err_t settings_store_save_api_region(api_region_settings_t *cfg);
 
+esp_err_t settings_store_load_disclaimer(disclaimer_settings_t *out);
+esp_err_t settings_store_save_disclaimer(disclaimer_settings_t *cfg);
+
 #ifdef __cplusplus
 }
 #endif

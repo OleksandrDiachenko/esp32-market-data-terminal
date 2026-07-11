@@ -12,7 +12,8 @@ TEST_NAMES = \
 	test_settings_codec_symbols \
 	test_settings_codec_locale \
 	test_settings_codec_api_region \
-	test_settings_api_region_map
+	test_settings_api_region_map \
+	test_settings_codec_disclaimer
 
 TESTS = $(addprefix $(BUILD_DIR)/,$(TEST_NAMES))
 
@@ -38,6 +39,9 @@ $(BUILD_DIR)/test_settings_codec_api_region: test_settings_codec_api_region.c $(
 
 $(BUILD_DIR)/test_settings_api_region_map: test_settings_api_region_map.c $(CODEC_SOURCES) $(REGION_MAP_SOURCES) test_common.h | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -o $@ test_settings_api_region_map.c $(CODEC_SOURCES) $(REGION_MAP_SOURCES)
+
+$(BUILD_DIR)/test_settings_codec_disclaimer: test_settings_codec_disclaimer.c $(CODEC_SOURCES) test_common.h | $(BUILD_DIR)
+	$(CC) $(CFLAGS) -o $@ test_settings_codec_disclaimer.c $(CODEC_SOURCES)
 
 clean:
 	rm -rf $(BUILD_DIR)
