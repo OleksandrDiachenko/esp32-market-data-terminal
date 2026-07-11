@@ -524,9 +524,14 @@ static void update_row(uint8_t index)
 
     if (meta.state == APP_STATE_SYMBOL_ERROR)
     {
+        // Invalid-symbol responses get their own muted "Unsupported" label,
+        // distinct from the transient-looking orange "Unavailable" used for
+        // every other unrecoverable error - this one won't clear itself
+        // until the region changes (see app_state_reset_symbols_for_region_change).
+        bool unsupported = (meta.last_error == MARKET_DATA_ERR_SYMBOL_NOT_FOUND);
         lv_label_set_text(row->price_label, "");
-        lv_obj_set_style_text_color(row->change_label, COLOR_WARN, 0);
-        lv_label_set_text(row->change_label, "Unavailable");
+        lv_obj_set_style_text_color(row->change_label, unsupported ? COLOR_MUTED : COLOR_WARN, 0);
+        lv_label_set_text(row->change_label, unsupported ? "Unsupported" : "Unavailable");
         return; // keep the last-known range/chart, if any, for context
     }
 
@@ -4664,6 +4669,12 @@ static void time_zones_nav_row_click_cb(lv_event_t *e)
 // did, forces the same full resync + WS reconnect a Wi-Fi gap resync uses -
 // the underlying host changed, so any existing klines history came from
 // the old one. See docs/decisions/0009-regional-server-auto-selection.md.
+// When the resolved server itself changes (region_new != region_old, as
+// opposed to just an AUTO/MANUAL source flip that resolves to the same
+// server), every symbol's cached klines and per-symbol failure counters are
+// also reset - a symbol marked "Unsupported" on the old server may well be
+// valid on the new one, and stale history from the old host shouldn't
+// linger on screen while the resync is in flight.
 static void apply_region_change(settings_api_region_t region, settings_api_region_source_t source)
 {
     api_region_settings_t cfg;
@@ -4672,9 +4683,14 @@ static void apply_region_change(settings_api_region_t region, settings_api_regio
     {
         return;
     }
+    bool region_changed = (cfg.region != region);
     cfg.region = region;
     cfg.region_source = source;
     settings_store_save_api_region(&cfg);
+    if (region_changed)
+    {
+        app_state_reset_symbols_for_region_change();
+    }
     app_state_sync_task_force_resync();
     app_state_notify_region_changed();
 }

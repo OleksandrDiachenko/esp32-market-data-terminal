@@ -141,6 +141,53 @@ which `update_row()` already renders as `"Unavailable"`. This satisfies
   territories relevant to Binance.US eligibility (Puerto Rico, Guam, USVI,
   American Samoa, Northern Mariana Islands).
 
+## Addendum (2026-07-11): a 3-strike budget for decision 7, and a klines-path bug fix
+
+Decision 7 as originally written assumed the REST batch klines fetch already
+surfaced `MARKET_DATA_ERR_SYMBOL_NOT_FOUND` for a Binance `-1121 Invalid
+symbol` response. In practice it did not: `contains_binance_error_code()`
+(added for `fetch_symbol_status`/`fetch_ticker_24hr`) was never wired into
+`market_data_client_fetch_klines()` or the batch variant, so a `-1121` body
+fell through to the generic `status_to_generic_error()` path and came back as
+`MARKET_DATA_ERR_HTTP_STATUS` - classified *recoverable* by
+`app_state_retry_is_recoverable()`. The practical effect, seen on hardware
+after a region switch: a delisted-or-region-unsupported symbol sat in
+`APP_STATE_SYMBOL_DEGRADED` ("Resyncing...") forever, retried every 60s
+indefinitely instead of ever reaching `APP_STATE_SYMBOL_ERROR`.
+
+This addendum closes that gap and adds a bounded retry budget rather than
+transitioning straight to `ERROR` on the first `-1121`:
+
+- Both klines fetch paths now run the same `-1121` detection the other two
+  endpoints already had.
+- A new per-symbol `invalid_symbol_count` (alongside `retry_attempt` in
+  `symbol_slot_t`/`app_state_symbol_meta_t`) tracks *consecutive*
+  `MARKET_DATA_ERR_SYMBOL_NOT_FOUND` responses. A new pure policy function,
+  `app_state_retry_invalid_symbol_is_recoverable(prior_strikes)` in
+  `app_state_retry_policy.c`, keeps the symbol `DEGRADED` for the first
+  `APP_STATE_MAX_INVALID_SYMBOL_ATTEMPTS - 1` (= 2) strikes and reports
+  unrecoverable on the 3rd, at which point `app_state_sync_task.c` passes
+  `recoverable=false` into `app_state_record_error()` as before, landing in
+  `APP_STATE_SYMBOL_ERROR`. Three strikes rather than one guards against a
+  single transient/misleading 400 (e.g. a slow exchangeInfo cache on
+  Binance's side) prematurely burying a symbol that would have synced fine
+  on the next attempt.
+- `update_row()` now distinguishes this terminal case from other
+  unrecoverable errors: `last_error == MARKET_DATA_ERR_SYMBOL_NOT_FOUND`
+  renders "Unsupported" in `COLOR_MUTED` (permanently-dead framing) instead
+  of the orange "Unavailable" used for every other `ERROR` cause, since this
+  one is expected to persist for the rest of the session by design rather
+  than clearing on its own.
+- `apply_region_change()` now calls a new `app_state_reset_symbols_for_region_change()`
+  whenever the resolved server actually changes (`region_new != region_old`
+  - an AUTO/MANUAL source flip that resolves to the same server does not
+  trigger it), zeroing every symbol's `invalid_symbol_count`,
+  `retry_attempt`, `state` (-> `INIT`), and `kline_count` (klines buffers
+  are left allocated, just treated as empty). A symbol ruled "Unsupported"
+  on the old server gets a clean slate on the new one, and stale
+  old-host chart data is cleared to "Loading..." rather than lingering
+  through the resync.
+
 ## Alternatives considered
 
 - **`America/*` prefix rule**: rejected - the existing tz table already

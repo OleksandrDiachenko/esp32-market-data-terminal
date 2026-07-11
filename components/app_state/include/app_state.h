@@ -45,6 +45,8 @@ typedef struct
     app_state_symbol_state_t state;
     market_data_err_t last_error;   // meaningful when state != APP_STATE_SYMBOL_SYNCED
     uint8_t retry_attempt;          // consecutive recoverable-failure count, reset to 0 on success
+    uint8_t invalid_symbol_count;   // consecutive MARKET_DATA_ERR_SYMBOL_NOT_FOUND count, reset to 0 on
+                                     // success or a region change - see app_state_retry_invalid_symbol_is_recoverable
     int64_t last_sync_time_ms;      // esp_timer_get_time()/1000 at last successful fetch; 0 if never synced
     uint16_t kline_count;
 } app_state_symbol_meta_t;
@@ -146,8 +148,24 @@ esp_err_t app_state_record_success(uint8_t index, const market_data_kline_t *kli
 
 // Records a failed fetch. recoverable selects DEGRADED (retry_attempt++)
 // vs ERROR (retry_attempt reset to 0, since retrying an unrecoverable error
-// unchanged is pointless).
+// unchanged is pointless). When err is MARKET_DATA_ERR_SYMBOL_NOT_FOUND,
+// invalid_symbol_count is incremented regardless of recoverable - the caller
+// (app_state_sync_task, via app_state_retry_invalid_symbol_is_recoverable)
+// decides when that count crosses APP_STATE_MAX_INVALID_SYMBOL_ATTEMPTS and
+// passes recoverable=false to make the ERROR transition final for the
+// session.
 esp_err_t app_state_record_error(uint8_t index, market_data_err_t err, bool recoverable);
+
+// Resets every watchlist symbol to a clean pre-sync state: state -> INIT,
+// last_error -> MARKET_DATA_OK, retry_attempt/invalid_symbol_count -> 0,
+// kline_count -> 0 (the klines buffer itself is left allocated and
+// untouched - kline_count 0 is enough to make the UI show "Loading..."
+// again). Klines buffers are not freed/reallocated. Called by display_ui.c
+// when a Region or Time Zone change actually changes the resolved server
+// (region_new != region_old), since the old host's history and any
+// session-long "unsupported on this server" verdicts no longer apply to the
+// new host - see docs/decisions/0009-regional-server-auto-selection.md.
+esp_err_t app_state_reset_symbols_for_region_change(void);
 
 // --- OTA update-available flag (written by app_state_ota_task) ---
 

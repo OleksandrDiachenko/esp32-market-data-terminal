@@ -168,7 +168,17 @@ static void run_due_fetches(uint8_t count, market_data_kline_t *const *scratch)
         }
         else
         {
-            bool recoverable = app_state_retry_is_recoverable(results[i].err);
+            bool recoverable;
+            if (results[i].err == MARKET_DATA_ERR_SYMBOL_NOT_FOUND)
+            {
+                app_state_symbol_meta_t pre;
+                app_state_get_symbol_meta(idx, &pre); // invalid_symbol_count BEFORE this failure is recorded
+                recoverable = app_state_retry_invalid_symbol_is_recoverable(pre.invalid_symbol_count);
+            }
+            else
+            {
+                recoverable = app_state_retry_is_recoverable(results[i].err);
+            }
             app_state_record_error(idx, results[i].err, recoverable);
 
             app_state_symbol_meta_t meta;
@@ -180,6 +190,13 @@ static void run_due_fetches(uint8_t count, market_data_kline_t *const *scratch)
                 s_next_attempt_ms[idx] = now_ms() + delay;
                 ESP_LOGW(TAG, "'%s' fetch failed (err=%d), retrying in %u ms", symbols[i], (int)results[i].err,
                           (unsigned)delay);
+            }
+            else if (results[i].err == MARKET_DATA_ERR_SYMBOL_NOT_FOUND)
+            {
+                ESP_LOGW(TAG,
+                         "'%s' rejected as invalid symbol %u times; marking unsupported, stopping retries this "
+                         "session",
+                         symbols[i], (unsigned)meta.invalid_symbol_count);
             }
             else
             {
