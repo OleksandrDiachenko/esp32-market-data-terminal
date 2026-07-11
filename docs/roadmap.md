@@ -15,7 +15,9 @@ Build an ESP-IDF based ESP32-P4 market data terminal as a professional embedded 
 - Phase 13 done: API region (Binance.com/.US) is now auto-derived from the
   selected time zone, with a manual override that survives later time-zone
   edits; a region switch forces a full resync + WS reconnect
-- Phase 14 (licensing & Binance data-usage compliance) in progress
+- Phase 14 done: Apache-2.0 `LICENSE`/`NOTICE`, a Settings > About screen
+  with Binance data attribution, and a first-run-after-update disclaimer
+  gated on the firmware version (see `docs/decisions/0010-licensing-and-disclaimer.md`)
 - Phase 15 (portfolio polish, renumbered from 13) not started
 
 ## Phases
@@ -437,7 +439,7 @@ transient/misleading 400) and a distinct "Unsupported" label separate from
 see the addendum in [0009](decisions/0009-regional-server-auto-selection.md).
 
 ### Phase 14: Licensing & data-usage compliance
-Status: Planned
+Status: Done
 
 Scope: the legal / first-run compliance layer that a portfolio-facing build
 needs before it is shown publicly - an OSI license for the code, visible
@@ -471,15 +473,15 @@ Done):
    Phase 6 settings/NVS pattern. Disclaimer text drafted below.
 
 Acceptance criteria:
-- [ ] `LICENSE` (Apache-2.0) at repo root; README clarifies code license vs.
+- [x] `LICENSE` (Apache-2.0) at repo root; README clarifies code license vs.
       Binance data terms (non-commercial use of the data)
-- [ ] "Market data by Binance" attribution + informational disclaimer
+- [x] "Market data by Binance" attribution + informational disclaimer
       reachable from the running UI (Settings > About)
-- [ ] First-run-after-update disclaimer shown once per firmware version,
+- [x] First-run-after-update disclaimer shown once per firmware version,
       acknowledgement persisted in NVS, gates entry to the dashboard
-- [ ] Disclaimer / acknowledgement-version logic host-tested (shows on
+- [x] Disclaimer / acknowledgement-version logic host-tested (shows on
       version change, stays hidden once acknowledged)
-- [ ] Validated on real hardware: fresh boot shows the disclaimer; reboot
+- [x] Validated on real hardware: fresh boot shows the disclaimer; reboot
       without a version change skips it; a firmware version change
       re-shows it
 
