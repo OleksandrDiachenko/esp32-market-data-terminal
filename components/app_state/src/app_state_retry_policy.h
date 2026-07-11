@@ -22,6 +22,19 @@ extern "C" {
 // to change the input (e.g. edit the watchlist), not a retry.
 bool app_state_retry_is_recoverable(market_data_err_t err);
 
+// Consecutive MARKET_DATA_ERR_SYMBOL_NOT_FOUND responses tolerated before a
+// symbol is treated as unsupported on the current server and retries stop
+// for the rest of the session (see app_state_retry_invalid_symbol_is_recoverable).
+#define APP_STATE_MAX_INVALID_SYMBOL_ATTEMPTS 3
+
+// True while a symbol that just got its Nth consecutive "invalid symbol"
+// response (prior_strikes = N-1, i.e. how many were recorded before this
+// one) should still be retried (state stays DEGRADED / "Resyncing...").
+// False once the session-long attempt budget is exhausted, at which point
+// the caller should treat the failure as unrecoverable (state -> ERROR) so
+// the symbol stops being retried until a region change resets its counter.
+bool app_state_retry_invalid_symbol_is_recoverable(uint8_t prior_strikes);
+
 // Exponential backoff with a cap: base_ms * 2^attempt, clamped to max_ms.
 // attempt is the consecutive-failure count (0 yields base_ms, 1 yields
 // 2*base_ms, and so on).

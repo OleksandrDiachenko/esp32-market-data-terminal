@@ -217,6 +217,10 @@ market_data_err_t market_data_client_fetch_klines(const market_data_klines_reque
     (void)market_data_http_read_body_snippet(session, body, sizeof(body), &body_len);
     market_data_http_close(session);
 
+    if (status == 400 && contains_binance_error_code(body, -1121))
+    {
+        return MARKET_DATA_ERR_SYMBOL_NOT_FOUND;
+    }
     ESP_LOGW(TAG, "klines request for '%s' failed: HTTP %d: %.*s", req->symbol, status, (int)body_len, body);
     return status_to_generic_error(status);
 }
@@ -309,6 +313,11 @@ market_data_err_t market_data_client_fetch_klines_24h_5m_batch(const char *const
         char body[MARKET_DATA_ERROR_BODY_MAX];
         size_t body_len = 0;
         (void)market_data_http_read_body_snippet(session, body, sizeof(body), &body_len);
+        if (status == 400 && contains_binance_error_code(body, -1121))
+        {
+            out_results[i].err = MARKET_DATA_ERR_SYMBOL_NOT_FOUND;
+            continue;
+        }
         ESP_LOGW(TAG, "klines request for '%s' failed: HTTP %d: %.*s", symbols[i], status, (int)body_len, body);
         out_results[i].err = status_to_generic_error(status);
     }

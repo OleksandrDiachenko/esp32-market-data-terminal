@@ -19,6 +19,14 @@ static void test_unrecoverable_classification(void)
     CHECK(!app_state_retry_is_recoverable(MARKET_DATA_ERR_SYMBOL_NOT_FOUND));
 }
 
+static void test_invalid_symbol_budget(void)
+{
+    CHECK(app_state_retry_invalid_symbol_is_recoverable(0));
+    CHECK(app_state_retry_invalid_symbol_is_recoverable(1));
+    CHECK(!app_state_retry_invalid_symbol_is_recoverable(2));
+    CHECK(!app_state_retry_invalid_symbol_is_recoverable(3));
+}
+
 static void test_backoff_formula(void)
 {
     CHECK(app_state_retry_backoff_delay_ms(1000, 8000, 0) == 1000);
@@ -48,6 +56,7 @@ int main(void)
 {
     test_recoverable_classification();
     test_unrecoverable_classification();
+    test_invalid_symbol_budget();
     test_backoff_formula();
     test_backoff_resets_conceptually();
     test_gap_detection_threshold();

@@ -18,6 +18,7 @@ typedef struct
     app_state_symbol_state_t state;
     market_data_err_t last_error;
     uint8_t retry_attempt;
+    uint8_t invalid_symbol_count;
     int64_t last_sync_time_ms;
     uint16_t kline_count;
     market_data_kline_t *klines; // PSRAM, APP_STATE_KLINE_CAPACITY entries
@@ -118,6 +119,7 @@ esp_err_t app_state_get_symbol_meta(uint8_t index, app_state_symbol_meta_t *out_
     out_meta->state = slot->state;
     out_meta->last_error = slot->last_error;
     out_meta->retry_attempt = slot->retry_attempt;
+    out_meta->invalid_symbol_count = slot->invalid_symbol_count;
     out_meta->last_sync_time_ms = slot->last_sync_time_ms;
     out_meta->kline_count = slot->kline_count;
     xSemaphoreGive(s_lock);
@@ -266,6 +268,7 @@ esp_err_t app_state_record_success(uint8_t index, const market_data_kline_t *kli
     slot->state = APP_STATE_SYMBOL_SYNCED;
     slot->last_error = MARKET_DATA_OK;
     slot->retry_attempt = 0;
+    slot->invalid_symbol_count = 0;
     slot->last_sync_time_ms = now_ms;
     xSemaphoreGive(s_lock);
     return ESP_OK;
@@ -281,6 +284,10 @@ esp_err_t app_state_record_error(uint8_t index, market_data_err_t err, bool reco
     xSemaphoreTake(s_lock, portMAX_DELAY);
     symbol_slot_t *slot = &s_symbols[index];
     slot->last_error = err;
+    if (err == MARKET_DATA_ERR_SYMBOL_NOT_FOUND && slot->invalid_symbol_count < UINT8_MAX)
+    {
+        slot->invalid_symbol_count++;
+    }
     if (recoverable)
     {
         slot->state = APP_STATE_SYMBOL_DEGRADED;
@@ -293,6 +300,22 @@ esp_err_t app_state_record_error(uint8_t index, market_data_err_t err, bool reco
     {
         slot->state = APP_STATE_SYMBOL_ERROR;
         slot->retry_attempt = 0;
+    }
+    xSemaphoreGive(s_lock);
+    return ESP_OK;
+}
+
+esp_err_t app_state_reset_symbols_for_region_change(void)
+{
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    for (uint8_t i = 0; i < s_symbol_count; i++)
+    {
+        symbol_slot_t *slot = &s_symbols[i];
+        slot->state = APP_STATE_SYMBOL_INIT;
+        slot->last_error = MARKET_DATA_OK;
+        slot->retry_attempt = 0;
+        slot->invalid_symbol_count = 0;
+        slot->kline_count = 0;
     }
     xSemaphoreGive(s_lock);
     return ESP_OK;

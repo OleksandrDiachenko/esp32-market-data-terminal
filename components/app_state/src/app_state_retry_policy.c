@@ -20,6 +20,11 @@ bool app_state_retry_is_recoverable(market_data_err_t err)
     }
 }
 
+bool app_state_retry_invalid_symbol_is_recoverable(uint8_t prior_strikes)
+{
+    return (uint32_t)prior_strikes + 1 < APP_STATE_MAX_INVALID_SYMBOL_ATTEMPTS;
+}
+
 uint32_t app_state_retry_backoff_delay_ms(uint32_t base_ms, uint32_t max_ms, uint8_t attempt)
 {
     if (max_ms < base_ms)

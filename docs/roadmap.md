@@ -426,6 +426,16 @@ Acceptance criteria:
       Binance.US; pick a non-U.S. zone -> data comes from Binance.com - see
       `docs/validation/regional-server-auto-selection-hardware-test.md`
 
+Follow-up (2026-07-11): hardware logs after a real region switch showed the
+klines REST path never actually classified a Binance `-1121 Invalid symbol`
+body as `MARKET_DATA_ERR_SYMBOL_NOT_FOUND` (only `exchangeInfo`/`ticker/24hr`
+did) - the symbol sat in `APP_STATE_SYMBOL_DEGRADED` ("Resyncing...")
+retrying every 60s forever instead of ever reaching `ERROR`. Fixed, plus a
+3-strike budget before the symbol is marked terminal (to tolerate a single
+transient/misleading 400) and a distinct "Unsupported" label separate from
+"Unavailable", with per-symbol counters reset on an actual region change -
+see the addendum in [0009](decisions/0009-regional-server-auto-selection.md).
+
 ### Phase 14: Branding, licensing & data-usage compliance
 Status: Planned
 
