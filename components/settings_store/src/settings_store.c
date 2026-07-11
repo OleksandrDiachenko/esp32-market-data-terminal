@@ -13,6 +13,7 @@ static const char *TAG = "settings_store";
 #define NVS_KEY_SYMBOLS "symbols"
 #define NVS_KEY_LOCALE "locale"
 #define NVS_KEY_API_REGION "api_region"
+#define NVS_KEY_DISCLAIMER "disclaimer"
 
 static esp_err_t load_blob(const char *key, void *out, size_t size)
 {
@@ -188,4 +189,36 @@ esp_err_t settings_store_save_api_region(api_region_settings_t *cfg)
     }
     settings_api_region_seal(cfg);
     return save_blob(NVS_KEY_API_REGION, cfg, sizeof(*cfg));
+}
+
+esp_err_t settings_store_load_disclaimer(disclaimer_settings_t *out)
+{
+    if (out == NULL)
+    {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    disclaimer_settings_t loaded;
+    esp_err_t err = load_blob(NVS_KEY_DISCLAIMER, &loaded, sizeof(loaded));
+    if (err == ESP_OK && settings_disclaimer_validate(&loaded) == SETTINGS_CODEC_OK)
+    {
+        *out = loaded;
+        return ESP_OK;
+    }
+    if (err != ESP_OK && err != ESP_ERR_NVS_NOT_FOUND)
+    {
+        ESP_LOGW(TAG, "Could not read disclaimer settings, using defaults: %s", esp_err_to_name(err));
+    }
+    settings_disclaimer_init_default(out);
+    return ESP_OK;
+}
+
+esp_err_t settings_store_save_disclaimer(disclaimer_settings_t *cfg)
+{
+    if (cfg == NULL)
+    {
+        return ESP_ERR_INVALID_ARG;
+    }
+    settings_disclaimer_seal(cfg);
+    return save_blob(NVS_KEY_DISCLAIMER, cfg, sizeof(*cfg));
 }

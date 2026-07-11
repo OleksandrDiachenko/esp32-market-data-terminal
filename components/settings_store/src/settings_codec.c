@@ -83,6 +83,7 @@ _Static_assert(sizeof(display_settings_t) <= SETTINGS_CODEC_MAX_RECORD_SIZE, "di
 _Static_assert(sizeof(symbol_settings_t) <= SETTINGS_CODEC_MAX_RECORD_SIZE, "symbol_settings_t exceeds codec scratch buffer");
 _Static_assert(sizeof(locale_settings_t) <= SETTINGS_CODEC_MAX_RECORD_SIZE, "locale_settings_t exceeds codec scratch buffer");
 _Static_assert(sizeof(api_region_settings_t) <= SETTINGS_CODEC_MAX_RECORD_SIZE, "api_region_settings_t exceeds codec scratch buffer");
+_Static_assert(sizeof(disclaimer_settings_t) <= SETTINGS_CODEC_MAX_RECORD_SIZE, "disclaimer_settings_t exceeds codec scratch buffer");
 
 void settings_display_init_default(display_settings_t *out)
 {
@@ -199,4 +200,38 @@ settings_codec_status_t settings_api_region_validate(const api_region_settings_t
         return SETTINGS_CODEC_BAD_RANGE;
     }
     return SETTINGS_CODEC_OK;
+}
+
+void settings_disclaimer_init_default(disclaimer_settings_t *out)
+{
+    memset(out, 0, sizeof(*out));
+    out->magic = SETTINGS_DISCLAIMER_MAGIC;
+    out->version = SETTINGS_DISCLAIMER_VERSION;
+    // acked_fw_version left empty ("") - never acknowledged.
+}
+
+void settings_disclaimer_seal(disclaimer_settings_t *db)
+{
+    db->acked_fw_version[SETTINGS_ACKED_FW_VERSION_MAX_LEN] = '\0';
+    settings_codec_seal(db, sizeof(*db), offsetof(disclaimer_settings_t, crc32), SETTINGS_DISCLAIMER_MAGIC,
+                         SETTINGS_DISCLAIMER_VERSION);
+}
+
+settings_codec_status_t settings_disclaimer_validate(const disclaimer_settings_t *db)
+{
+    return settings_codec_validate(db, sizeof(*db), offsetof(disclaimer_settings_t, crc32), SETTINGS_DISCLAIMER_MAGIC,
+                                    SETTINGS_DISCLAIMER_VERSION);
+}
+
+bool settings_disclaimer_should_show(const char *acked, const char *running)
+{
+    if (running == NULL || running[0] == '\0')
+    {
+        return false;
+    }
+    if (acked == NULL || acked[0] == '\0')
+    {
+        return true;
+    }
+    return strcmp(acked, running) != 0;
 }

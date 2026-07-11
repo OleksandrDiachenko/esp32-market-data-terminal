@@ -107,6 +107,27 @@ typedef struct
     uint8_t reserved2[2];   // pad to 4-byte alignment
 } api_region_settings_t;
 
+#define SETTINGS_DISCLAIMER_MAGIC 0x5344434cu // 'SDCL'
+#define SETTINGS_DISCLAIMER_VERSION 1u
+#define SETTINGS_ACKED_FW_VERSION_MAX_LEN 31 // esp_app_desc_t.version is char[32]
+
+// Tracks the firmware version string the user last accepted the first-run
+// disclaimer for. The disclaimer re-shows whenever the running firmware
+// version differs from acked_fw_version - see
+// settings_disclaimer_should_show() - so it naturally re-appears after every
+// OTA update (the version string always changes) and stays hidden across
+// plain reboots (it doesn't). A disclaimer *text* change can only ship
+// inside a firmware update too, so this one field covers both cases without
+// a separate "disclaimer text version".
+typedef struct
+{
+    uint32_t magic;
+    uint16_t version;
+    uint16_t reserved;
+    uint32_t crc32;
+    char acked_fw_version[SETTINGS_ACKED_FW_VERSION_MAX_LEN + 1];
+} disclaimer_settings_t;
+
 typedef enum
 {
     SETTINGS_CODEC_OK = 0,
@@ -144,6 +165,16 @@ settings_codec_status_t settings_locale_validate(const locale_settings_t *db);
 void settings_api_region_init_default(api_region_settings_t *out);
 void settings_api_region_seal(api_region_settings_t *db);
 settings_codec_status_t settings_api_region_validate(const api_region_settings_t *db);
+
+void settings_disclaimer_init_default(disclaimer_settings_t *out);
+void settings_disclaimer_seal(disclaimer_settings_t *db);
+settings_codec_status_t settings_disclaimer_validate(const disclaimer_settings_t *db);
+
+// Pure decision helper: true when the disclaimer has not yet been accepted
+// for the currently running firmware version (empty/never-acknowledged, or
+// acknowledged for a different version - e.g. an OTA update just landed).
+// running must be non-empty; acked may be empty (never acknowledged).
+bool settings_disclaimer_should_show(const char *acked, const char *running);
 
 #ifdef __cplusplus
 }
