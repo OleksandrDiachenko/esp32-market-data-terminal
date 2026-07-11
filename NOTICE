@@ -1,0 +1,10 @@
+ESP32 Market Data Terminal (SISWOOD Market Terminal)
+Copyright 2026 Oleksandr Diachenko
+
+Licensed under the Apache License, Version 2.0.
+
+This product displays market data retrieved from the public Binance REST
+and WebSocket APIs ("Market data by Binance"). That market data is subject
+to Binance's own Terms of Use and is used here for non-commercial,
+informational purposes only. The Apache License, Version 2.0 above applies
+to this project's source code, NOT to the market data.

@@ -1,12 +1,26 @@
 # ESP32 Market Data Terminal
 
-Embedded C / ESP-IDF firmware project for an ESP32-P4 based market data
-terminal.
+Embedded C / ESP-IDF firmware for an ESP32-P4 based market data terminal: a
+touchscreen device that shows a live cryptocurrency watchlist (price, change,
+sparkline) sourced from the public Binance REST and WebSocket APIs.
 
-The project is currently in the bootstrap stage. The first goal is to build a
-clean firmware foundation with a reproducible ESP-IDF setup, clear module
-boundaries, tests for hardware-independent logic, and documented hardware
-debugging steps.
+Built as a portfolio project for practicing a professional embedded
+firmware workflow: clear module boundaries, host-side tests for
+hardware-independent logic, real hardware validation, and small reviewed
+changes tracked in [docs/roadmap.md](docs/roadmap.md) and
+[docs/decisions/](docs/decisions/).
+
+## Features
+
+- Live watchlist (up to 10 symbols) with price, 24h change, and sparkline,
+  updated via a Binance WebSocket stream and periodic REST sync
+- Wi-Fi setup and management (scan, connect, saved profiles) from the device UI
+- Locale settings: 12h/24h time, date format, time zone (region/city picker)
+- Regional API server auto-selection (Binance.com vs. Binance.US) derived
+  from the selected time zone, with manual override
+  (see [docs/decisions/0009-regional-server-auto-selection.md](docs/decisions/0009-regional-server-auto-selection.md))
+- Over-the-air firmware updates via GitHub Releases
+  (see [docs/decisions/0006-ota-firmware-update.md](docs/decisions/0006-ota-firmware-update.md))
 
 ## Hardware
 
@@ -56,26 +70,28 @@ Example port names:
 ```text
 CMakeLists.txt
 sdkconfig.defaults
-main/
-  CMakeLists.txt
-  esp32-market-data-terminal.c
-```
-
-Planned structure as the project grows:
-
-```text
+main/                   - app entry point, LVGL display UI, dev console
 components/
-docs/
-test/
-.github/
+  app_state             - runtime state model + sync/WS/OTA background tasks
+  board_jc4880p443c     - display/touch/backlight board bring-up
+  display_format        - price/number formatting helpers
+  market_data_client    - Binance REST client (exchangeInfo, klines)
+  market_data_ws_client - Binance WebSocket kline stream client
+  ota_client            - GitHub Releases OTA update client
+  settings_store        - persisted settings (display/symbols/locale/
+                          api region), sealed-blob NVS codec
+  time_sync             - SNTP time sync
+  wifi_manager          - Wi-Fi connection policy + profile store
+docs/                   - architecture, roadmap, ADRs, hardware/testing notes
+.github/                - CI workflows
 ```
 
 ## Current Status
 
-- ESP-IDF project skeleton exists
-- Target is configured for ESP32-P4
-- Firmware builds successfully
-- Application currently logs a startup message
+See [docs/roadmap.md](docs/roadmap.md) for the phase-by-phase build log.
+The firmware currently boots to a live watchlist dashboard with Wi-Fi,
+locale/timezone, watchlist, and OTA update settings screens, backed by
+host-tested settings/parsing logic and validated on real hardware.
 
 ## Development Workflow
 
@@ -98,8 +114,25 @@ Before opening a pull request:
 - Hardware test notes are added when hardware behavior changes
 - Documentation is updated when setup or behavior changes
 
+## License & data usage
+
+The **source code** of this project is licensed under the
+[Apache License 2.0](LICENSE) — free to use, modify, and distribute,
+including a patent grant.
+
+**Market data** shown on the device is provided by the public
+[Binance](https://www.binance.com) APIs and is **separate from the code
+license**. Under Binance's Terms of Use this data may be used for
+**non-commercial, informational purposes only** — you may not charge for it
+or profit from it (ads, referral fees). This is a free, non-commercial
+open-source build, which satisfies that restriction.
+
+Market data may be delayed, incomplete, or inaccurate. Nothing shown on the
+device is financial, investment, or trading advice. Always verify prices on
+the official exchange.
+
 ## Notes
 
-This is a firmware architecture and reliability project. Public market data APIs
-may be used later as demo data sources, but private trading APIs, credentials,
-and secrets must not be committed.
+This is a firmware architecture and reliability project. Only public market
+data APIs are used (no keys/secrets); private trading APIs, credentials, and
+secrets must not be committed.
