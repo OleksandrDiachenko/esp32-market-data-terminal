@@ -2,6 +2,7 @@ idf_component_register(
     SRCS
         "src/settings_codec.c"
         "src/settings_store.c"
+        "src/settings_api_region_map.c"
     INCLUDE_DIRS
         "include"
     PRIV_REQUIRES

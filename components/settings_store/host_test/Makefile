@@ -5,12 +5,14 @@ BUILD_DIR = build
 CFLAGS = -std=c11 -Wall -Wextra -Werror -g -fsanitize=address,undefined -I$(SRC_DIR) -I$(INCLUDE_DIR)
 
 CODEC_SOURCES = $(SRC_DIR)/settings_codec.c
+REGION_MAP_SOURCES = $(SRC_DIR)/settings_api_region_map.c
 
 TEST_NAMES = \
 	test_settings_codec_display \
 	test_settings_codec_symbols \
 	test_settings_codec_locale \
-	test_settings_codec_api_region
+	test_settings_codec_api_region \
+	test_settings_api_region_map
 
 TESTS = $(addprefix $(BUILD_DIR)/,$(TEST_NAMES))
 
@@ -33,6 +35,9 @@ $(BUILD_DIR)/test_settings_codec_locale: test_settings_codec_locale.c $(CODEC_SO
 
 $(BUILD_DIR)/test_settings_codec_api_region: test_settings_codec_api_region.c $(CODEC_SOURCES) test_common.h | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -o $@ test_settings_codec_api_region.c $(CODEC_SOURCES)
+
+$(BUILD_DIR)/test_settings_api_region_map: test_settings_api_region_map.c $(CODEC_SOURCES) $(REGION_MAP_SOURCES) test_common.h | $(BUILD_DIR)
+	$(CC) $(CFLAGS) -o $@ test_settings_api_region_map.c $(CODEC_SOURCES) $(REGION_MAP_SOURCES)
 
 clean:
 	rm -rf $(BUILD_DIR)
