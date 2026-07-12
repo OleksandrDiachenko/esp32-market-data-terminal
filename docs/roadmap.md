@@ -21,7 +21,11 @@ Build an ESP-IDF based ESP32-P4 market data terminal as a professional embedded 
 - Phase 15 done: a new Settings > Display screen with a brightness slider
   and a night mode that dims to a fixed minimum between a configurable
   start/end time (see `docs/decisions/0011-display-brightness-night-mode.md`)
-- Phase 16 (portfolio polish, renumbered from 13) not started
+- Phase 16 done: boot time cut from ~19s to ~1.4s by building Settings
+  sub-screens lazily (create-on-enter/destroy-on-exit) instead of all 16
+  screens up front, plus two root-caused build-time bugs fixed along the way
+  (see `docs/decisions/0012-lazy-settings-screen-lifecycle.md`)
+- Phase 17 (portfolio polish, renumbered from 13) not started
 
 ## Phases
 
@@ -533,7 +537,37 @@ Acceptance criteria:
       `--nav night_time` with dark-themed, muted-accent slider/switch/rollers,
       and `idf.py build` + host tests pass
 
-### Phase 16: Portfolio polish
+### Phase 16: Boot performance - lazy Settings screen lifecycle
+Status: Done
+
+A user-reported "long white screen at startup" led to measuring
+`display_ui_render()` (which built all 16 screens - dashboard + 13 Settings
+sub-screens + status bar + disclaimer - synchronously at boot) at ~17.4s,
+with two concrete bugs (a 4x-redundant keyboard button-matrix rebuild, and a
+one-time "first complex widget" construction tax) accounting for ~10.6s of
+that. Rather than only patch those two, Settings sub-screens now follow a
+create-on-enter/destroy-on-exit lifecycle (at most one - plus the dashboard
+and status bar - resident at a time), bounding peak LVGL memory usage
+instead of just deferring it. See
+`docs/decisions/0012-lazy-settings-screen-lifecycle.md` for the full
+investigation and the decision to keep (not revert) the PSRAM-backed LVGL
+pool from the prior Wi-Fi-crash fix now that this bounds its working set.
+
+Acceptance criteria:
+- [x] Boot time (touch-controller-ready to `"Display UI started."`) ≤3.5s
+      (measured: ~1.4s, down from ~19s)
+- [x] Every Settings sub-screen's first-entry time ≤800ms, including
+      re-entry after teardown (measured: 1-186ms across all 13 screens)
+- [x] No regression against the standing Wi-Fi-nav crash fix
+      (`docs/debugging/wifi-nav-pool-exhaustion.md`): 150 cycles (450
+      navigations) of wifi/watchlist_manage/settings via the dev console,
+      zero failures
+- [x] Every screen verified via `dev_screenshot.py --nav <target>` after the
+      refactor (all 13 lazy sub-screens plus watchlist/settings/disclaimer),
+      confirming correct rendering and correct re-entry
+- [x] `idf.py build` + host tests pass
+
+### Phase 17: Portfolio polish
 Status: Planned
 
 Acceptance criteria:

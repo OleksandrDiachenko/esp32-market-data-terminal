@@ -221,6 +221,12 @@ static wifi_manager_snapshot_t s_wifi_snapshot;
 #define WIFI_DISPLAY_ROWS_MAX (WIFI_MANAGER_MAX_SCAN_APS + WIFI_MANAGER_MAX_PROFILES)
 static wifi_display_row_t s_wifi_rendered_rows[WIFI_DISPLAY_ROWS_MAX];
 static uint8_t s_wifi_rendered_count;
+// File-level (not update_wifi_screen()'s own function-local static) so
+// destroy_settings_view() can clear it when the Wi-Fi screen is torn down -
+// otherwise a fresh s_wifi_list on re-entry would compare "unchanged"
+// against this stale cache and never render anything until the actual Wi-Fi
+// environment changes.
+static bool s_wifi_list_built;
 
 // Per-row click context, indexed the same as the row it was created for.
 // Static (not stack-local) so each row's click handler can safely reference
@@ -678,25 +684,307 @@ static void update_row(uint8_t index)
     }
 }
 
+// Settings sub-screens are built lazily (on first navigation into them, via
+// ensure_settings_view_built() below) and torn down when navigated away
+// from (via destroy_settings_view()), rather than all built once at boot.
+// Building all 13 up front on this board's PSRAM-backed LVGL pool measured
+// ~11.5s of the ~17s startup render - see docs/decisions/0012 for the full
+// investigation. At most one of these (plus the always-resident
+// s_settings_list) exists at a time.
+static void build_locale_screen(lv_obj_t *screen);
+static void build_time_format_screen(lv_obj_t *screen);
+static void build_date_format_screen(lv_obj_t *screen);
+static void build_time_zone_screen(lv_obj_t *screen);
+static void build_time_zone_city_screen(lv_obj_t *screen);
+static void build_region_screen(lv_obj_t *screen);
+static void build_display_screen(lv_obj_t *screen);
+static void build_wifi_screen(lv_obj_t *screen);
+static void build_wifi_password_screen(lv_obj_t *screen);
+static void build_watchlist_manage_screen(lv_obj_t *screen);
+static void build_watchlist_add_screen(lv_obj_t *screen);
+static void build_updates_screen(lv_obj_t *screen);
+static void build_about_screen(lv_obj_t *screen);
+
+// Forward declarations for handles destroy_settings_view() below needs to
+// null out but are declared later in the file, near where they're actually
+// used (s_date_format_checks[] depends on DATE_FORMAT_COUNT, only known once
+// s_date_formats[] is declared alongside the Date format screen's own code).
+static lv_obj_t *s_wifi_menu_backdrop;
+static lv_obj_t *s_wifi_menu_card;
+static lv_obj_t *s_wifi_menu_ssid_label;
+static void destroy_date_format_view(void); // defined near s_date_format_checks[]'s declaration
+
+// Builds the sub-screen for `view` if it doesn't exist yet (idempotent - a
+// no-op if already built). Called both by show_settings_view() and by every
+// helper that touches a sub-screen's widgets before show_settings_view()
+// itself runs (e.g. watchlist_manage_rebuild(), wifi_password_screen_set_ssid()).
+static void ensure_settings_view_built(settings_view_t view)
+{
+    switch (view)
+    {
+    case SETTINGS_VIEW_LOCALE:
+        if (!s_locale_screen)
+        {
+            build_locale_screen(s_dashboard_screen);
+        }
+        break;
+    case SETTINGS_VIEW_TIME_FORMAT:
+        if (!s_time_format_screen)
+        {
+            build_time_format_screen(s_dashboard_screen);
+        }
+        break;
+    case SETTINGS_VIEW_DATE_FORMAT:
+        if (!s_date_format_screen)
+        {
+            build_date_format_screen(s_dashboard_screen);
+        }
+        break;
+    case SETTINGS_VIEW_TIME_ZONES:
+        if (!s_time_zone_screen)
+        {
+            build_time_zone_screen(s_dashboard_screen);
+        }
+        break;
+    case SETTINGS_VIEW_TIME_ZONE_CITIES:
+        if (!s_time_zone_city_screen)
+        {
+            build_time_zone_city_screen(s_dashboard_screen);
+        }
+        break;
+    case SETTINGS_VIEW_REGION:
+        if (!s_region_screen)
+        {
+            build_region_screen(s_dashboard_screen);
+        }
+        break;
+    case SETTINGS_VIEW_DISPLAY:
+        if (!s_display_screen)
+        {
+            build_display_screen(s_dashboard_screen);
+        }
+        break;
+    case SETTINGS_VIEW_WIFI:
+        if (!s_wifi_screen)
+        {
+            build_wifi_screen(s_dashboard_screen);
+        }
+        break;
+    case SETTINGS_VIEW_WIFI_PASSWORD:
+        if (!s_wifi_password_screen)
+        {
+            build_wifi_password_screen(s_dashboard_screen);
+        }
+        break;
+    case SETTINGS_VIEW_WATCHLIST_MANAGE:
+        if (!s_watchlist_manage_screen)
+        {
+            build_watchlist_manage_screen(s_dashboard_screen);
+        }
+        break;
+    case SETTINGS_VIEW_WATCHLIST_ADD:
+        if (!s_watchlist_add_screen)
+        {
+            build_watchlist_add_screen(s_dashboard_screen);
+        }
+        break;
+    case SETTINGS_VIEW_UPDATES:
+        if (!s_updates_screen)
+        {
+            build_updates_screen(s_dashboard_screen);
+        }
+        break;
+    case SETTINGS_VIEW_ABOUT:
+        if (!s_about_screen)
+        {
+            build_about_screen(s_dashboard_screen);
+        }
+        break;
+    default:
+        break; // SETTINGS_VIEW_LIST: s_settings_list is always resident, built once at boot
+    }
+}
+
+// Tears down whichever sub-screen `view` refers to and nulls its handle, so
+// a later ensure_settings_view_built() rebuilds it fresh instead of
+// dereferencing a deleted object. A no-op if that view was never built (or
+// is SETTINGS_VIEW_LIST, which is never destroyed). lv_obj_delete() cascades
+// to every child automatically, so only the root handle needs clearing here
+// for correctness - the two exceptions are handles read by helpers that can
+// run while a *different* view is active (wifi_menu_hide(),
+// region_refresh_marks()), which guard on their own screen's root handle
+// instead of relying on this function to reach into their children.
+static void destroy_settings_view(settings_view_t view)
+{
+    switch (view)
+    {
+    case SETTINGS_VIEW_LOCALE:
+        if (s_locale_screen)
+        {
+            lv_obj_delete(s_locale_screen);
+            s_locale_screen = NULL;
+        }
+        break;
+    case SETTINGS_VIEW_TIME_FORMAT:
+        if (s_time_format_screen)
+        {
+            lv_obj_delete(s_time_format_screen);
+            s_time_format_screen = NULL;
+            s_time_format_check_12h = NULL;
+            s_time_format_check_24h = NULL;
+        }
+        break;
+    case SETTINGS_VIEW_DATE_FORMAT:
+        destroy_date_format_view();
+        break;
+    case SETTINGS_VIEW_TIME_ZONES:
+        if (s_time_zone_screen)
+        {
+            lv_obj_delete(s_time_zone_screen);
+            s_time_zone_screen = NULL;
+        }
+        break;
+    case SETTINGS_VIEW_TIME_ZONE_CITIES:
+        if (s_time_zone_city_screen)
+        {
+            lv_obj_delete(s_time_zone_city_screen);
+            s_time_zone_city_screen = NULL;
+            s_time_zone_city_list = NULL;
+            s_time_zone_city_subtitle = NULL;
+        }
+        break;
+    case SETTINGS_VIEW_REGION:
+        if (s_region_screen)
+        {
+            lv_obj_delete(s_region_screen);
+            s_region_screen = NULL;
+            s_region_subtitle = NULL;
+            s_region_check_auto = NULL;
+            s_region_check_intl = NULL;
+            s_region_check_us = NULL;
+        }
+        break;
+    case SETTINGS_VIEW_DISPLAY:
+        if (s_display_screen)
+        {
+            lv_obj_delete(s_display_screen);
+            s_display_screen = NULL;
+            s_display_brightness_slider = NULL;
+            s_display_brightness_value_label = NULL;
+            s_display_night_switch = NULL;
+            s_display_night_start_row = NULL;
+            s_display_night_start_value = NULL;
+            s_display_night_end_row = NULL;
+            s_display_night_end_value = NULL;
+        }
+        break;
+    case SETTINGS_VIEW_WIFI:
+        if (s_wifi_screen)
+        {
+            lv_obj_delete(s_wifi_screen);
+            s_wifi_screen = NULL;
+            s_wifi_list = NULL;
+            s_wifi_menu_backdrop = NULL;
+            s_wifi_menu_card = NULL;
+            s_wifi_menu_ssid_label = NULL;
+            // Forces update_wifi_screen()'s next tick to render into the
+            // fresh (empty) s_wifi_list instead of comparing against this
+            // now-stale cache and concluding nothing changed - see
+            // s_wifi_list_built's own declaration comment.
+            s_wifi_list_built = false;
+            s_wifi_rendered_count = 0;
+        }
+        break;
+    case SETTINGS_VIEW_WIFI_PASSWORD:
+        if (s_wifi_password_screen)
+        {
+            lv_obj_delete(s_wifi_password_screen);
+            s_wifi_password_screen = NULL;
+            s_wifi_ssid_input = NULL;
+            s_wifi_password_input = NULL;
+            s_wifi_password_keyboard = NULL;
+            s_wifi_password_status = NULL;
+        }
+        break;
+    case SETTINGS_VIEW_WATCHLIST_MANAGE:
+        if (s_watchlist_manage_screen)
+        {
+            lv_obj_delete(s_watchlist_manage_screen);
+            s_watchlist_manage_screen = NULL;
+            s_watchlist_manage_subtitle = NULL;
+            s_watchlist_list = NULL;
+        }
+        break;
+    case SETTINGS_VIEW_WATCHLIST_ADD:
+        if (s_watchlist_add_screen)
+        {
+            lv_obj_delete(s_watchlist_add_screen);
+            s_watchlist_add_screen = NULL;
+            s_watchlist_add_subtitle = NULL;
+            s_watchlist_symbol_input = NULL;
+            s_watchlist_add_keyboard = NULL;
+            s_watchlist_status_label = NULL;
+            s_watchlist_match_card = NULL;
+            s_watchlist_match_pair_label = NULL;
+            s_watchlist_match_last_price_label = NULL;
+            s_watchlist_match_change_label = NULL;
+            s_watchlist_match_range_label = NULL;
+            s_watchlist_error_note = NULL;
+            s_watchlist_error_label = NULL;
+            s_watchlist_add_button = NULL;
+        }
+        break;
+    case SETTINGS_VIEW_UPDATES:
+        if (s_updates_screen)
+        {
+            lv_obj_delete(s_updates_screen);
+            s_updates_screen = NULL;
+            s_updates_state_card = NULL;
+            s_updates_state_icon = NULL;
+            s_updates_state_text = NULL;
+            s_updates_current_version_label = NULL;
+            s_updates_latest_version_label = NULL;
+            s_updates_last_checked_label = NULL;
+            s_updates_status_label = NULL;
+            s_updates_progress_row = NULL;
+            s_updates_progress_bar = NULL;
+            s_updates_progress_label = NULL;
+            s_updates_action_button = NULL;
+            s_updates_action_label = NULL;
+        }
+        break;
+    case SETTINGS_VIEW_ABOUT:
+        if (s_about_screen)
+        {
+            lv_obj_delete(s_about_screen);
+            s_about_screen = NULL;
+        }
+        break;
+    default:
+        break; // SETTINGS_VIEW_LIST: never destroyed
+    }
+}
+
 // Shows exactly one of the Settings sub-screens, hiding the rest. Only
 // meaningful while DISPLAY_UI_SCREEN_SETTINGS is active.
 static void show_settings_view(settings_view_t view)
 {
+    // At most one sub-screen (besides the always-resident s_settings_list)
+    // exists at a time: tear down whichever one was showing before this
+    // call (a no-op if it was SETTINGS_VIEW_LIST, or already the target -
+    // re-navigating to the current view doesn't rebuild it), then build the
+    // new target if it isn't already resident from a previous visit... it
+    // never is, since we just destroyed it, but ensure_settings_view_built()
+    // is also called by helpers that run *before* this function (e.g.
+    // watchlist_manage_rebuild()), so by the time we get here the target may
+    // already exist - that's fine, it's idempotent.
+    settings_view_t previous = s_settings_view;
+    if (previous != view)
+    {
+        destroy_settings_view(previous);
+    }
     s_settings_view = view;
-    lv_obj_add_flag(s_settings_list, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_add_flag(s_locale_screen, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_add_flag(s_time_format_screen, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_add_flag(s_date_format_screen, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_add_flag(s_time_zone_screen, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_add_flag(s_time_zone_city_screen, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_add_flag(s_region_screen, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_add_flag(s_display_screen, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_add_flag(s_wifi_screen, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_add_flag(s_wifi_password_screen, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_add_flag(s_watchlist_manage_screen, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_add_flag(s_watchlist_add_screen, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_add_flag(s_updates_screen, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_add_flag(s_about_screen, LV_OBJ_FLAG_HIDDEN);
+    ensure_settings_view_built(view);
 
     lv_obj_t *target = s_settings_list;
     switch (view)
@@ -743,6 +1031,7 @@ static void show_settings_view(settings_view_t view)
     default:
         break;
     }
+    lv_obj_add_flag(s_settings_list, LV_OBJ_FLAG_HIDDEN);
     lv_obj_remove_flag(target, LV_OBJ_FLAG_HIDDEN);
 }
 
@@ -754,19 +1043,13 @@ static void set_active_screen(display_ui_screen_t screen)
     {
         lv_obj_remove_flag(s_rows_container, LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(s_settings_list, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_add_flag(s_locale_screen, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_add_flag(s_time_format_screen, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_add_flag(s_date_format_screen, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_add_flag(s_time_zone_screen, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_add_flag(s_time_zone_city_screen, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_add_flag(s_region_screen, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_add_flag(s_display_screen, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_add_flag(s_wifi_screen, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_add_flag(s_wifi_password_screen, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_add_flag(s_watchlist_manage_screen, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_add_flag(s_watchlist_add_screen, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_add_flag(s_updates_screen, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_add_flag(s_about_screen, LV_OBJ_FLAG_HIDDEN);
+        // At most one lazily-built sub-screen can be resident (see
+        // show_settings_view()) - tear it down rather than just hiding it,
+        // same as leaving Settings for any other sub-screen. No per-screen
+        // hide-flag list needed anymore: whichever one was showing is gone,
+        // and every other screen was already destroyed on its own way out.
+        destroy_settings_view(s_settings_view);
+        s_settings_view = SETTINGS_VIEW_LIST;
         lv_label_set_text(s_nav_label, "SETTINGS");
     }
     else
@@ -1795,6 +2078,7 @@ static void wifi_password_connect_cb(lv_event_t *e)
 // (empty, editable via the shared keyboard).
 static void wifi_password_screen_set_ssid(const char *ssid, bool known)
 {
+    ensure_settings_view_built(SETTINGS_VIEW_WIFI_PASSWORD); // callers touch its widgets before show_settings_view()
     s_wifi_ssid_known = known;
     lv_textarea_set_text(s_wifi_ssid_input, ssid);
     lv_label_set_text(s_wifi_password_status, "");
@@ -2015,13 +2299,20 @@ static void wifi_ap_click_cb(lv_event_t *e)
 // down while it's open. Retargeted on each open via s_wifi_menu_ssid,
 // copied out of the row's click ctx rather than keeping a pointer to it,
 // since s_wifi_click_ctx slots get overwritten on the next rebuild.
-static lv_obj_t *s_wifi_menu_backdrop;
-static lv_obj_t *s_wifi_menu_card;
-static lv_obj_t *s_wifi_menu_ssid_label;
+// (s_wifi_menu_backdrop/_card/_ssid_label are forward-declared earlier, next
+// to the other lazy-view handles destroy_settings_view() needs to reach.)
 static char s_wifi_menu_ssid[WIFI_MANAGER_SSID_MAX + 1];
 
 static void wifi_menu_hide(void)
 {
+    // Guards against the Wi-Fi screen not existing yet: wifi_row_click_cb()
+    // calls this defensively before ensure_settings_view_built(WIFI) has
+    // necessarily ever run (e.g. the very first time Wi-Fi is opened this
+    // session), when there's no stale open menu to hide in the first place.
+    if (!s_wifi_screen)
+    {
+        return;
+    }
     lv_obj_add_flag(s_wifi_menu_backdrop, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(s_wifi_menu_card, LV_OBJ_FLAG_HIDDEN);
 }
@@ -2515,8 +2806,9 @@ static void update_wifi_screen(void)
     // creates it empty), so an all-zero new_count on the very first tick
     // would otherwise compare equal to the equally-empty initial cache and
     // skip building anything - not even the "Scanning..."/add-network
-    // placeholder. s_wifi_list_built forces the first pass through.
-    static bool s_wifi_list_built;
+    // placeholder. s_wifi_list_built (file-level - see its declaration)
+    // forces the first pass through, including the first pass after a
+    // destroy_settings_view()-driven rebuild.
     if (s_wifi_list_built && new_count == s_wifi_rendered_count &&
         memcmp(new_rows, s_wifi_rendered_rows, (size_t)new_count * sizeof(new_rows[0])) == 0)
     {
@@ -2808,13 +3100,26 @@ static void build_wifi_password_screen(lv_obj_t *screen)
     lv_obj_set_height(s_wifi_password_keyboard,
                        (BOARD_JC4880P443C_LCD_V_RES - STATUSBAR_HEIGHT_PX) / 2 - 50);
 
-    // Set up all four keyboard modes: text lower/upper, symbols mode 1, symbols mode 2
-    lv_keyboard_set_map(s_wifi_password_keyboard, LV_KEYBOARD_MODE_TEXT_LOWER, s_wifi_kb_map_lc, s_wifi_kb_ctrl_map);
-    lv_keyboard_set_map(s_wifi_password_keyboard, LV_KEYBOARD_MODE_TEXT_UPPER, s_wifi_kb_map_uc, s_wifi_kb_ctrl_map);
-    lv_keyboard_set_map(s_wifi_password_keyboard, WIFI_KB_MODE_SYM_1, s_wifi_kb_map_sym_1, s_wifi_kb_ctrl_map_sym);
-    lv_keyboard_set_map(s_wifi_password_keyboard, WIFI_KB_MODE_SYM_2, s_wifi_kb_map_sym_2, s_wifi_kb_ctrl_map_sym);
-
-    lv_keyboard_set_mode(s_wifi_password_keyboard, LV_KEYBOARD_MODE_TEXT_LOWER);
+    // Only the initially-visible mode (TEXT_LOWER, keyboard->mode's default
+    // after lv_keyboard_create()) needs a real button matrix at build time.
+    // UPPER/SYM_1/SYM_2 are never pre-registered via lv_keyboard_set_map():
+    // wifi_keyboard_event_cb() below already calls lv_buttonmatrix_set_map()
+    // directly with the correct static array on every mode-switch tap,
+    // bypassing LVGL's *global* kb_map[]/kb_ctrl[] table entirely (see the
+    // comment above that function) - so those 3 registrations were never
+    // actually read back from anywhere. Each lv_keyboard_set_map() call
+    // unconditionally rebuilds the *currently active* mode's full button
+    // matrix (lv_keyboard_update_map() -> lv_buttonmatrix_set_map(obj,
+    // kb_map[keyboard->mode])) regardless of which mode was just registered,
+    // so calling it 4 times at build time rebuilt the same LOWER-mode matrix
+    // 4 times over for a screen the user hasn't even opened yet - measured
+    // at ~8.3s of this screen's ~8.4s build time on this PSRAM-backed pool.
+    // One direct set_map/set_ctrl_map call - the same pattern the event
+    // handler already uses for every runtime mode switch - replaces LVGL's
+    // own post-create placeholder matrix with the correct LOWER-mode one in
+    // a single rebuild instead of five.
+    lv_buttonmatrix_set_map(s_wifi_password_keyboard, s_wifi_kb_map_lc);
+    lv_buttonmatrix_set_ctrl_map(s_wifi_password_keyboard, s_wifi_kb_ctrl_map);
     lv_obj_remove_event_cb(s_wifi_password_keyboard, lv_keyboard_def_event_cb);
     lv_obj_add_event_cb(s_wifi_password_keyboard, wifi_keyboard_event_cb, LV_EVENT_VALUE_CHANGED, NULL);
     lv_obj_add_flag(s_wifi_password_keyboard, LV_OBJ_FLAG_HIDDEN);
@@ -3109,6 +3414,7 @@ static void build_watchlist_add_row(lv_obj_t *parent, bool enabled)
 // of these rows.
 static void watchlist_manage_rebuild(void)
 {
+    ensure_settings_view_built(SETTINGS_VIEW_WATCHLIST_MANAGE); // callers touch its widgets before show_settings_view()
     uint8_t count = app_state_symbol_count();
     if (count > SETTINGS_MAX_WATCHLIST)
     {
@@ -3333,6 +3639,7 @@ static void watchlist_symbol_input_changed_cb(lv_event_t *e)
 // carries over.
 static void watchlist_add_screen_reset(void)
 {
+    ensure_settings_view_built(SETTINGS_VIEW_WATCHLIST_ADD); // callers touch its widgets before show_settings_view()
     lv_textarea_set_text(s_watchlist_symbol_input, "");
     watchlist_add_hide_result();
 
@@ -3677,15 +3984,15 @@ static void build_watchlist_add_screen(lv_obj_t *screen)
     s_watchlist_add_keyboard = lv_keyboard_create(s_watchlist_add_screen);
     style_dark_keyboard(s_watchlist_add_keyboard);
     lv_obj_set_height(s_watchlist_add_keyboard, (BOARD_JC4880P443C_LCD_V_RES - STATUSBAR_HEIGHT_PX) / 2 - 50);
-    lv_keyboard_set_map(s_watchlist_add_keyboard, LV_KEYBOARD_MODE_TEXT_LOWER, s_watchlist_kb_map_lc,
-                         s_watchlist_kb_ctrl_map);
-    lv_keyboard_set_map(s_watchlist_add_keyboard, LV_KEYBOARD_MODE_TEXT_UPPER, s_watchlist_kb_map_uc,
-                         s_watchlist_kb_ctrl_map);
-    lv_keyboard_set_map(s_watchlist_add_keyboard, WATCHLIST_KB_MODE_SYM_1, s_watchlist_kb_map_sym_1,
-                         s_watchlist_kb_ctrl_map_sym);
-    lv_keyboard_set_map(s_watchlist_add_keyboard, WATCHLIST_KB_MODE_SYM_2, s_watchlist_kb_map_sym_2,
-                         s_watchlist_kb_ctrl_map_sym);
-    lv_keyboard_set_mode(s_watchlist_add_keyboard, LV_KEYBOARD_MODE_TEXT_LOWER);
+    // Same reasoning as build_wifi_password_screen(): only the initial
+    // TEXT_LOWER matrix needs to be real at build time - UPPER/SYM_1/SYM_2
+    // are populated on-demand by watchlist_add_keyboard_event_cb()'s direct
+    // lv_buttonmatrix_set_map() calls on every mode-switch tap, never read
+    // back from LVGL's global kb_map[]/kb_ctrl[] table. One direct call here
+    // instead of four lv_keyboard_set_map() calls avoids four redundant
+    // full-matrix rebuilds of the same LOWER mode.
+    lv_buttonmatrix_set_map(s_watchlist_add_keyboard, s_watchlist_kb_map_lc);
+    lv_buttonmatrix_set_ctrl_map(s_watchlist_add_keyboard, s_watchlist_kb_ctrl_map);
     lv_keyboard_set_textarea(s_watchlist_add_keyboard, s_watchlist_symbol_input);
     lv_obj_remove_event_cb(s_watchlist_add_keyboard, lv_keyboard_def_event_cb);
     lv_obj_add_event_cb(s_watchlist_add_keyboard, watchlist_add_keyboard_event_cb, LV_EVENT_VALUE_CHANGED, NULL);
@@ -3706,6 +4013,7 @@ static void updates_back_cb(lv_event_t *e)
 // screen-entry-reset convention as watchlist_add_screen_reset().
 static void updates_screen_reset(void)
 {
+    ensure_settings_view_built(SETTINGS_VIEW_UPDATES); // callers touch its widgets before show_settings_view()
     const esp_app_desc_t *running = esp_app_get_description();
     lv_label_set_text(s_updates_current_version_label, running->version);
 
@@ -4157,6 +4465,19 @@ static const date_format_option_t s_date_formats[] = {
 // Parallel to s_date_formats[] - each row's checkmark, hidden/shown on
 // selection (see date_format_row_click_cb()).
 static lv_obj_t *s_date_format_checks[DATE_FORMAT_COUNT];
+
+// Forward-declared near the top of the file (destroy_settings_view() needs
+// it, but s_date_format_checks[]'s size depends on DATE_FORMAT_COUNT, only
+// known here).
+static void destroy_date_format_view(void)
+{
+    if (s_date_format_screen)
+    {
+        lv_obj_delete(s_date_format_screen);
+        s_date_format_screen = NULL;
+        memset(s_date_format_checks, 0, sizeof(s_date_format_checks));
+    }
+}
 
 // --- Settings > Time > Time zones ---
 //
@@ -5033,6 +5354,7 @@ static void apply_region_change(settings_api_region_t region,
 // single checkmark between rows that get torn down and recreated anyway.
 static void show_time_zone_cities(tz_zone_id_t zone)
 {
+    ensure_settings_view_built(SETTINGS_VIEW_TIME_ZONE_CITIES); // callers touch its widgets before show_settings_view()
     lv_label_set_text(s_time_zone_city_subtitle, s_tz_zone_names[zone]);
     lv_obj_clean(s_time_zone_city_list);
 
@@ -5176,6 +5498,16 @@ static void region_back_cb(lv_event_t *e)
 
 static void region_refresh_marks(void)
 {
+    // Guards against the Region screen not existing yet: apply_region_change()
+    // calls this any time the region resolves (e.g. auto-derived from a time
+    // zone pick elsewhere in Settings), not just while this screen is open.
+    // If it's not built, there are no checkmarks to update - the next
+    // ensure_settings_view_built(REGION) builds it with the freshly-saved
+    // settings already reflected (build_region_screen() calls this itself).
+    if (!s_region_screen)
+    {
+        return;
+    }
     api_region_settings_t cfg;
     settings_store_load_api_region(&cfg);
 
@@ -5616,6 +5948,34 @@ static void show_disclaimer_screen(void)
     lv_screen_load(s_disclaimer_screen);
 }
 
+// lv_textarea (via its cursor-blink lv_anim_t - see start_cursor_blink() in
+// LVGL's lv_textarea.c), and possibly other widget classes never touched by
+// the dashboard/status bar, have a one-time "first instance in the whole
+// app" construction cost on this board - measured at ~5.9s for the very
+// first lv_textarea_create() call, dropping to normal (tens of ms) for
+// every one after. Left alone, that cost would land on whichever lazily-
+// built Settings screen the user happens to navigate into first (Wi-Fi's
+// "Add Network" or Watchlist's "Add symbol", both of which use a textarea
+// and keyboard) - unpredictable and could take several seconds on a screen
+// that's supposed to open in under a second. Paying it once here instead,
+// with a throwaway hidden object immediately deleted, means it happens
+// during the dark boot window (board_jc4880p443c_backlight_on() hasn't run
+// yet - see display_ui_start()) where it's invisible, not on a random future
+// tap. lv_roller is included defensively (used by Display > Night mode's
+// time picker, also never touched by the dashboard) even though no similar
+// spike was observed for it in testing.
+static void warm_up_lvgl_widget_classes(lv_obj_t *screen)
+{
+    int64_t t0 = esp_timer_get_time();
+    lv_obj_t *scratch = lv_obj_create(screen);
+    lv_obj_add_flag(scratch, LV_OBJ_FLAG_HIDDEN);
+    lv_textarea_create(scratch);
+    lv_keyboard_create(scratch);
+    lv_roller_create(scratch);
+    lv_obj_delete(scratch);
+    ESP_LOGI(TAG, "LVGL widget class warm-up: %lld ms", (esp_timer_get_time() - t0) / 1000);
+}
+
 static void display_ui_render(void)
 {
     lv_obj_t *screen = lv_screen_active();
@@ -5633,21 +5993,19 @@ static void display_ui_render(void)
     settings_store_load_display(&s_display); // the Display screen below needs it for its initial slider/checks
     display_apply_brightness(); // correct the full-duty board_jc4880p443c_backlight_on() from display_ui_start()
 
+    int64_t __render_t0 = esp_timer_get_time();
+    warm_up_lvgl_widget_classes(screen);
     build_settings_list(screen);
-    build_locale_screen(screen);
-    build_time_format_screen(screen);
-    build_date_format_screen(screen);
-    build_time_zone_screen(screen);
-    build_time_zone_city_screen(screen);
-    build_region_screen(screen);
-    build_display_screen(screen);
-    build_wifi_screen(screen);
-    build_wifi_password_screen(screen);
-    build_watchlist_manage_screen(screen);
-    build_watchlist_add_screen(screen);
-    build_updates_screen(screen);
-    build_about_screen(screen);
     build_statusbar(screen);
+    ESP_LOGI(TAG, "display_ui_render: dashboard ready in %lld ms",
+             (esp_timer_get_time() - __render_t0) / 1000);
+
+    // Every Settings sub-screen (Wi-Fi, Time, Display, Watchlist manage/add,
+    // Updates, About - 13 in all) is built lazily on first navigation into
+    // it instead of here, via ensure_settings_view_built() - see its
+    // comment. Building all of them up front on this board's PSRAM-backed
+    // LVGL pool measured ~17s of startup render time; only the dashboard
+    // and status bar are needed for the first visible frame.
 
     set_active_screen(DISPLAY_UI_SCREEN_WATCHLIST);
 
@@ -5758,8 +6116,11 @@ static int cmd_nav(int argc, char **argv)
         const char *ssid = (argc >= 3) ? argv[2] : "Test Network";
         strncpy(s_wifi_pending_ssid, ssid, WIFI_MANAGER_SSID_MAX);
         s_wifi_pending_ssid[WIFI_MANAGER_SSID_MAX] = '\0';
-        lv_textarea_set_text(s_wifi_password_input, "");
+        // wifi_password_screen_set_ssid() ensures the screen (and thus
+        // s_wifi_password_input) exists before anything below touches it -
+        // must run first now that this screen is built lazily.
         wifi_password_screen_set_ssid(s_wifi_pending_ssid, true);
+        lv_textarea_set_text(s_wifi_password_input, "");
         show_settings_view(SETTINGS_VIEW_WIFI_PASSWORD);
 
         // Mirrors wifi_field_focus_cb() - a real tap on the textarea would
