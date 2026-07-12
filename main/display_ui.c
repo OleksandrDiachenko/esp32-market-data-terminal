@@ -986,6 +986,16 @@ static void wifi_password_poll(void); // defined further down, alongside the res
 // "Add symbol" row resets the add screen) - forward-declared here rather
 // than reordering the two screens' otherwise-independent code.
 static void watchlist_manage_rebuild(void);
+// Queues watchlist_manage_rebuild() to run at the start of the next
+// lv_timer_handler pass instead of immediately. Callers reached from an input
+// event (remove/drag) use this, not the direct rebuild: the rebuild does
+// lv_obj_clean(s_watchlist_list), which would free the very row whose
+// CLICKED/RELEASED/PRESS_LOST event is still being dispatched (and which indev
+// still points at). Deferring keeps that teardown out of event dispatch. This
+// is defensive hardening for a latent LVGL footgun - not the cause of the
+// crash/freeze bugs this file was audited for (that was LVGL-pool exhaustion,
+// fixed by moving the pool to PSRAM - see docs/debugging/wifi-nav-pool-exhaustion.md).
+static void schedule_watchlist_manage_rebuild(void);
 static void watchlist_add_screen_reset(void);
 
 static void update_timer_cb(lv_timer_t *timer)
@@ -2454,6 +2464,35 @@ static uint8_t build_wifi_display_rows(const wifi_manager_snapshot_t *snap, wifi
 // saved network until one attempt happened to land between rebuilds.
 #define WIFI_AUTO_RESCAN_TICKS 7 // ~7s between automatic background rescans
 
+// True while a finger is pressed down anywhere inside obj's on-screen area.
+// update_wifi_screen() runs from the update timer (not indev dispatch), so
+// lv_indev_get_active_obj() is NULL here - instead we test each pointer
+// indev's live press point against obj's coords. Used to hold off the Wi-Fi
+// list teardown/rebuild while a tap is in progress over it: lv_obj_clean()
+// would free the row indev still references. Defensive hardening against a
+// latent teardown-under-touch footgun (see schedule_watchlist_manage_rebuild),
+// separate from the pool-exhaustion root cause fixed via the PSRAM pool.
+static bool pointer_pressed_within(lv_obj_t *obj)
+{
+    lv_area_t coords;
+    lv_obj_get_coords(obj, &coords);
+    for (lv_indev_t *indev = lv_indev_get_next(NULL); indev != NULL; indev = lv_indev_get_next(indev))
+    {
+        if (lv_indev_get_type(indev) != LV_INDEV_TYPE_POINTER ||
+            lv_indev_get_state(indev) != LV_INDEV_STATE_PRESSED)
+        {
+            continue;
+        }
+        lv_point_t p;
+        lv_indev_get_point(indev, &p);
+        if (p.x >= coords.x1 && p.x <= coords.x2 && p.y >= coords.y1 && p.y <= coords.y2)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
 static void update_wifi_screen(void)
 {
     static uint8_t s_rescan_tick;
@@ -2483,6 +2522,16 @@ static void update_wifi_screen(void)
     {
         return; // nothing changed - leave the existing rows (and any in-progress tap) alone
     }
+
+    // The row set changed, but if a finger is currently down on the list,
+    // defer the teardown: rebuilding now would free the row indev still holds.
+    // Return without committing the cache below so the change is re-detected
+    // next tick and applied as soon as the finger lifts.
+    if (pointer_pressed_within(s_wifi_list))
+    {
+        return;
+    }
+
     memcpy(s_wifi_rendered_rows, new_rows, (size_t)new_count * sizeof(new_rows[0]));
     s_wifi_rendered_count = new_count;
     s_wifi_list_built = true;
@@ -2810,7 +2859,7 @@ static void watchlist_remove_click_cb(lv_event_t *e)
         return;
     }
     watchlist_save_current_symbols();
-    watchlist_manage_rebuild();
+    schedule_watchlist_manage_rebuild(); // deferred: this runs from the remove button's CLICKED event
 }
 
 // Arms a drag: captures start state from ctx and the current touch point,
@@ -2904,7 +2953,10 @@ static void watchlist_drag_released_cb(lv_event_t *e)
         return;
     }
     watchlist_save_current_symbols();
-    watchlist_manage_rebuild(); // resyncs s_watchlist_click_ctx[], stale after move_to_index() during the drag
+    // Deferred: this runs from the drag handle's RELEASED/PRESS_LOST event, so
+    // tearing down s_watchlist_list here would free the row indev still holds.
+    // Resyncs s_watchlist_click_ctx[], stale after move_to_index() during the drag.
+    schedule_watchlist_manage_rebuild();
 }
 
 // One row per watchlist symbol: a drag handle, ticker (flex-grow), and a
@@ -3075,6 +3127,22 @@ static void watchlist_manage_rebuild(void)
         build_watchlist_symbol_row(meta.symbol, i);
     }
     build_watchlist_add_row(s_watchlist_list, count < SETTINGS_MAX_WATCHLIST);
+}
+
+static void watchlist_manage_rebuild_async(void *unused)
+{
+    (void)unused;
+    watchlist_manage_rebuild();
+}
+
+// See the forward declaration's comment for why event-context callers must
+// defer. Cancel any already-queued rebuild first so a burst of removals/drags
+// coalesces into a single rebuild on the next handler pass rather than one per
+// event.
+static void schedule_watchlist_manage_rebuild(void)
+{
+    lv_async_call_cancel(watchlist_manage_rebuild_async, NULL);
+    lv_async_call(watchlist_manage_rebuild_async, NULL);
 }
 
 static void watchlist_manage_back_cb(lv_event_t *e)

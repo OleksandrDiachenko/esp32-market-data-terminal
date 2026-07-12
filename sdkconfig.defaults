@@ -111,17 +111,33 @@ CONFIG_LV_FONT_MONTSERRAT_20=y
 # a larger face than 20px to read comfortably as a touch-scrollable wheel.
 CONFIG_LV_FONT_MONTSERRAT_28=y
 
-# The default 64KB LVGL heap left only ~11KB (measured via lv_mem_monitor())
-# once the watchlist dashboard's row/chart widgets grew to 9 of the 10
-# possible symbols - one more chart's first lv_realloc() (each needs its own
-# ~1.15KB point buffer, plus per-row containers/labels) exhausted it, and
-# LVGL's LV_ASSERT_MALLOC handler traps in an infinite while(1) on the LVGL
-# task on allocation failure - a total, silent UI freeze (LV_USE_LOG is off,
-# so the assert's own message never printed either). Doubling to 128KB
-# leaves ample headroom at the 10-symbol cap (measured ~142KB free on the
-# surrounding system-level internal heap at the time, so this is well within
-# budget) - see docs/debugging/watchlist-add-freeze.md.
-CONFIG_LV_MEM_SIZE_KILOBYTES=128
+# The LVGL object/style pool. 64KB then 128KB (in internal RAM) both proved
+# too small: 128KB was sized for the dashboard's row/chart widgets alone (see
+# docs/debugging/watchlist-add-freeze.md), but the later Settings > Wi-Fi
+# screen renders one ~2KB widget subtree per network in range, and a busy RF
+# environment (20+ APs) needs ~40-64KB on top of the ~93KB the rest of the UI
+# already holds. That overflowed the 128KB pool mid-build, and LVGL's
+# allocation-failure path is catastrophic here - LV_ASSERT_MALLOC traps in an
+# infinite while(1) on the LVGL task (silent UI freeze -> task WDT), or a
+# near-full/fragmented pool hands back a bad block and faults - which is the
+# root cause of the crash/freeze/dead-touch bugs during Wi-Fi navigation (see
+# docs/debugging/wifi-nav-pool-exhaustion.md). Rather than keep chasing a
+# just-big-enough internal-RAM number, the pool is relocated to PSRAM (see the
+# LV_MEM_POOL_ALLOC note below) and
+# sized to 512KB - comfortably above the worst-case whole-UI footprint, and
+# out of the contended internal RAM shared with esp_hosted/Wi-Fi/TLS. Object
+# allocation now hits 200MHz PSRAM; the frame/draw buffers are unaffected
+# (they're owned by the board bring-up, not this pool).
+#
+# The pool is backed from the PSRAM *heap* at boot (LV_MEM_POOL_ALLOC ->
+# heap_caps_malloc(MALLOC_CAP_SPIRAM), wired via COMPILE_DEFINITIONS in the
+# top-level CMakeLists.txt) rather than a static EXT_RAM_BSS_ATTR array: on
+# this pre-rev-v3 ESP32-P4 the linker already runs with
+# --enable-non-contiguous-regions, which discards .sbss sections once external
+# BSS is enabled (SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY), so a static PSRAM pool
+# won't link. The runtime pool keeps lv_mem_monitor() working and sidesteps
+# that entirely.
+CONFIG_LV_MEM_SIZE_KILOBYTES=512
 
 # Needed for LV_EVENT_HIT_TEST (display_ui.c's asymmetric_hit_test_cb()):
 # without it, lv_hit_test_info_t is only forward-declared and its `point`/
