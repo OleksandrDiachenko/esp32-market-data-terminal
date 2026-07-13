@@ -25,4 +25,4 @@ idf_build_set_property(INCLUDE_DIRECTORIES "${CMAKE_CURRENT_LIST_DIR}/lvgl_ext" 
 idf_build_set_property(COMPILE_DEFINITIONS "LV_MEM_POOL_INCLUDE=\"lv_psram_pool.h\"" APPEND)
 idf_build_set_property(COMPILE_DEFINITIONS "LV_MEM_POOL_ALLOC=lv_psram_pool_alloc" APPEND)
 
-project(esp32-market-data-terminal)
+project(crypto-market-data-ticker)

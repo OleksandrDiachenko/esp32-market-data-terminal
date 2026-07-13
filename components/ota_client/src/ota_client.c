@@ -12,10 +12,10 @@
 #include "time_sync.h"
 
 // GitHub requires a User-Agent header on API requests (403s without one).
-#define OTA_CLIENT_USER_AGENT "esp32-market-data-terminal"
+#define OTA_CLIENT_USER_AGENT "crypto-market-data-ticker"
 #define OTA_CLIENT_GITHUB_OWNER "OleksandrDiachenko"
-#define OTA_CLIENT_GITHUB_REPO "esp32-market-data-terminal"
-#define OTA_CLIENT_ASSET_NAME "esp32-market-data-terminal.bin"
+#define OTA_CLIENT_GITHUB_REPO "crypto-market-data-ticker"
+#define OTA_CLIENT_ASSET_NAME "crypto-market-data-ticker.bin"
 
 #define OTA_CLIENT_HTTP_TIMEOUT_MS 10000
 // GitHub's redirect Location header (release asset download -> a signed

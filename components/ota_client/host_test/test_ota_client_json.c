@@ -26,7 +26,7 @@ static void test_realistic_github_release_payload(void)
         "\"html_url\":\"https://github.com/o/r/releases/tag/0.10.0\","
         "\"id\":1,\"tag_name\":\"0.10.0\",\"target_commitish\":\"main\","
         "\"name\":\"0.10.0\",\"draft\":false,\"prerelease\":false,"
-        "\"assets\":[{\"browser_download_url\":\"https://github.com/o/r/releases/download/0.10.0/esp32-market-data-terminal.bin\"}]}";
+        "\"assets\":[{\"browser_download_url\":\"https://github.com/o/r/releases/download/0.10.0/crypto-market-data-ticker.bin\"}]}";
     char out[OTA_CLIENT_TAG_MAX_LEN];
     ota_client_err_t err = ota_client_extract_tag_name(json, strlen(json), out, sizeof(out));
     CHECK(err == OTA_CLIENT_OK);
