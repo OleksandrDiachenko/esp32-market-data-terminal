@@ -61,6 +61,10 @@ static esp_err_t parse_embedded_image(const esp_partition_t *partition, size_t *
         return ESP_ERR_INVALID_ARG;
     }
 
+    // cppcheck-suppress duplicateAssignExpression
+    // offset (read cursor) and total (accumulated image size) start equal but
+    // diverge below: total keeps growing with checksum/padding/signature
+    // bytes that offset never reads.
     size_t offset = sizeof(header);
     size_t total = sizeof(header);
     esp_app_desc_t app_desc = {0};

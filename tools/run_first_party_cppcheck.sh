@@ -15,7 +15,12 @@ fi
 # loader aborts entirely on the first compile-database entry whose file
 # is missing, so rewrite each entry's path to this checkout and drop any
 # entry that still doesn't resolve, before cppcheck ever sees the file.
-filtered_db="${compile_db%.json}.first_party.json"
+# The filtered copy is written outside build/ since that directory (and
+# its contents) can be root-owned/read-only when the build itself ran in
+# a container image running as a different user than this step.
+filtered_dir=$(mktemp -d)
+trap 'rm -rf "${filtered_dir}"' EXIT
+filtered_db="${filtered_dir}/compile_commands.first_party.json"
 python3 - "${compile_db}" "${filtered_db}" "${PWD}" <<'PY'
 import json
 import os
