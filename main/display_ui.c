@@ -6193,7 +6193,10 @@ static void display_ui_render(void)
     lv_obj_set_flex_flow(s_rows_container, LV_FLEX_FLOW_COLUMN);
 
     settings_store_load_locale(&s_locale); // the Time screens below need it for their initial checkmarks
-    settings_store_load_display(&s_display); // the Display screen below needs it for its initial slider/checks
+    // s_display is loaded by display_ui_start() before the initial black
+    // frame is made visible. Keeping that early load there lets the
+    // backlight use the saved brightness without making the first scanout
+    // wait for any PSRAM-backed dashboard widget construction.
     // Deliberately NOT calling display_apply_brightness() here: this call
     // predates the backlight-after-render reorder (it "corrected" a
     // full-duty backlight_on() that used to run *before* render), and left
@@ -6246,23 +6249,27 @@ esp_err_t display_ui_start(void)
     lv_indev_t *touch_indev = NULL;
     ESP_RETURN_ON_ERROR(board_jc4880p443c_touch_start(display, &touch_indev), TAG, "start touch");
 
+    // The board layer has already cleared the single DPI framebuffer and
+    // styled LVGL's initial screen black. Load the saved brightness before
+    // making that known-black frame visible, but deliberately do not build
+    // the PSRAM-backed dashboard yet. This keeps the first visible scanout
+    // independent of the slow first-widget allocation path.
+    settings_store_load_display(&s_display);
+
     if (!board_jc4880p443c_display_lock(0))
     {
         ESP_LOGE(TAG, "failed to acquire LVGL lock");
         return ESP_FAIL;
     }
-    display_ui_render();
-    // Force the first frame into the DPI framebuffer before the backlight
-    // comes on. Building the widget tree above only marks areas dirty; the
-    // actual draw + flush would otherwise happen on esp_lvgl_port's task
-    // after this lock is released. lv_refr_now() synchronously renders every
-    // invalid 40px stripe and waits for each on_color_trans_done callback,
-    // which means the pixels are safely copied into the framebuffer. It does
-    // not mean the continuously-scanning DPI panel has presented them yet;
-    // that separate scanout boundary is covered immediately after unlock.
+
+    // Flush only the minimal black root before the backlight comes on.
+    // The old path built and synchronously rendered the whole dashboard here;
+    // with the LVGL pool in PSRAM its final 40px stripe could still expose a
+    // stale light scanout. The complete dashboard is constructed below while
+    // this verified-black frame remains on the panel.
     int64_t first_frame_t0 = esp_timer_get_time();
     lv_refr_now(display);
-    ESP_LOGI(TAG, "display_ui_start: first frame copied to framebuffer in %lld ms",
+    ESP_LOGI(TAG, "display_ui_start: black frame copied to framebuffer in %lld ms",
              (esp_timer_get_time() - first_frame_t0) / 1000);
     board_jc4880p443c_display_unlock();
 
@@ -6280,9 +6287,21 @@ esp_err_t display_ui_start(void)
     // active) rather than board_jc4880p443c_backlight_on()'s fixed 100% -
     // going to full duty first would show a visible brightness dip one
     // update-timer tick later when display_apply_brightness() corrected it.
-    // s_display was loaded by display_ui_render() above; this touches only
-    // LEDC, no LVGL objects, so it's safe outside the lock.
+    // s_display was loaded before the black-frame flush above; this touches
+    // only LEDC, no LVGL objects, so it's safe outside the lock.
     display_apply_brightness();
+
+    // Keep the already-flushed black frame on-screen while the costly
+    // dashboard widgets are allocated from the PSRAM-backed LVGL pool. The
+    // port task cannot flush a partially-built tree while this lock is held;
+    // after unlock it draws the finished dark UI asynchronously.
+    if (!board_jc4880p443c_display_lock(0))
+    {
+        ESP_LOGE(TAG, "failed to acquire LVGL lock for dashboard build");
+        return ESP_FAIL;
+    }
+    display_ui_render();
+    board_jc4880p443c_display_unlock();
 
     ESP_LOGI(TAG, "Display UI started.");
     return ESP_OK;
