@@ -255,8 +255,9 @@ crash/WDT reports with fresh backtraces. That investigation reconfirmed the
 same root cause this ADR and `82b1352` already fixed (LVGL pool exhaustion
 during Wi-Fi-list construction), found nothing that changes decisions 1-5
 above, and the revert was undone: this ADR's lifecycle plus the PSRAM pool
-are both still in effect on `main`. Two things came out of that pass worth
-recording here rather than in a separate ADR:
+are both still in effect on `main`. Four things came out of that pass (and
+the user's hardware reports that followed it) worth recording here rather
+than in a separate ADR:
 
 **A latent bug in the lifecycle itself, fixed.** `schedule_watchlist_manage_rebuild()`
 (added by `82b1352` as hardening, kept through this ADR) defers the
@@ -273,6 +274,72 @@ belt-and-suspenders guard in the async callback itself that no-ops if that
 view isn't active. Verified via a temporary console hook reproducing the
 exact race: `watchlist_manage_screen` stayed `ALIVE` after Back on the
 unpatched build, `NULL` with the fix.
+
+**Two more of decision 4's ordering bugs, in the physical-tap paths.**
+User hardware testing found tapping "+ Add network" (or any unsaved AP row)
+hard-hung the device on every tap: both `wifi_add_network_click_cb()` and
+`wifi_ap_click_cb()` called `lv_textarea_set_text(s_wifi_password_input, "")`
+*before* `wifi_password_screen_set_ssid()` - the same
+touch-a-widget-before-building-it ordering this ADR's decision 4 documents
+fixing in `cmd_nav`'s `wifi_password` target. These two were missed because
+the verification sweep drove screens via the `nav` console (the fixed path),
+not physical taps; `LV_ASSERT_NULL` then trapped on the LVGL task while it
+held the display lock, killing touch and console together. Fixed by the
+same reorder. Lesson folded into the verification checklist: every
+entry-point *tap handler* into a lazy screen needs covering, not just the
+nav targets.
+
+**The white boot flash returned - the backlight-ordering fix had several
+holes.** User hardware testing reported a 1-2s white screen at every boot
+despite the backlight-after-render reorder, then - after a first round of
+fixes - a residual white flash exactly where the bottom status bar sits,
+appearing right before the bar renders. A framebuffer clear had been tried
+the previous day without success, which turned out to be the key clue: the
+buffer was clean, but the LVGL port task then flushed the *default
+light-themed screen* back into it - the light source itself was never
+removed. The bar-shaped residual matches the render geometry: the draw
+buffer is 40px-high stripes and the bar is exactly 40px, i.e. the final
+stripe of the first full-screen flush, the last region painted over.
+
+The complete fix works by making it impossible for the panel to ever be lit
+over anything but black:
+
+1. `backlight_pwm_init()`'s LEDC channel started at `.duty = 1023` -
+   backlight to 100% as a side effect of display bring-up (~1.5s after
+   power-on). This is what made the flash survive every reordering of the
+   *later* backlight calls. Now starts at duty 0.
+2. New `board_jc4880p443c_backlight_early_off()` (GPIO output low), first
+   statement of `app_main()` - the pin's power-on state isn't guaranteed
+   off and LEDC only takes the pin over ~1.5s in.
+3. The DPI framebuffer is cleared to black (memset + `esp_cache_msync`)
+   right after panel init.
+4. The LVGL default screen is styled black immediately after display
+   registration - any flush before the real UI exists now paints black
+   over black, never the light default theme (the piece the previous
+   day's buffer-clear attempt was missing).
+5. The `display_apply_brightness()` call at the top of
+   `display_ui_render()` (which predates the reorder and, left in place,
+   lit the panel at render start) - dropped.
+6. `lv_refr_now()` under the display lock right after
+   `display_ui_render()`: building the widget tree only marks areas
+   dirty - the actual draw+flush happens on esp_lvgl_port's task after
+   the lock is released, i.e. after any backlight call placed "after
+   render", and the first full-screen software render measures 1155ms.
+   The first dark frame is now synchronously rendered and flushed before
+   anything lights the panel, and the backlight comes on straight at the
+   user's saved brightness via `display_apply_brightness()` rather than
+   full-duty `backlight_on()` (also removing the 100%-then-dip artifact
+   one timer tick later).
+7. `lv_refr_now()` completes on the DPI driver's `on_color_trans_done`
+   callback, which only guarantees that the last 40px LVGL stripe has been
+   copied into the internal framebuffer - not that the panel has physically
+   scanned it out. With the 180-degree software rotation, that final logical
+   status-bar stripe maps to the first native scan lines and can remain from
+   the previous light frame until the next refresh. After releasing the LVGL
+   lock, startup now waits 40ms plus one FreeRTOS tick before applying
+   brightness. The verified 34MHz / 576x976 total timing is 16.53ms per
+   frame, so the guard covers more than two complete scans without changing
+   the working single-framebuffer/partial-buffer configuration.
 
 **Baseline hardware profiling, with one number worth flagging.** New
 on-demand (`memlog` console command) and optional periodic

@@ -22,6 +22,16 @@ esp_err_t board_jc4880p443c_display_start(lv_display_t **out_display);
  */
 esp_err_t board_jc4880p443c_touch_start(lv_display_t *display, lv_indev_t **out_indev);
 
+/**
+ * Drives the backlight GPIO low as a plain output, without touching LEDC.
+ * Call as the very first thing in app_main(): the pin's power-on reset
+ * state is not guaranteed off, and display bring-up (which is when LEDC
+ * takes the pin over, at duty 0) only happens ~1.5s into boot - this
+ * closes the window where an uninitialized panel could glow white before
+ * any other code has run. ledc_channel_config() re-muxes the pin later.
+ */
+esp_err_t board_jc4880p443c_backlight_early_off(void);
+
 esp_err_t board_jc4880p443c_backlight_on(void);
 esp_err_t board_jc4880p443c_backlight_off(void);
 

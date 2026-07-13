@@ -8,6 +8,8 @@
 #include "esp_check.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "lvgl.h"
 #include "ota_client.h"
 #include "sdkconfig.h"
@@ -45,6 +47,12 @@ static const char *TAG = "display_ui";
 #define TIME_LIST_ROW_HEIGHT_PX 60 // Time format / Date format / Time zones list rows
 #define WIFI_PASSWORD_FIELD_HEIGHT_PX 54 // matches the eye-toggle button below it
 #define UPDATE_PERIOD_MS 1000
+// lv_refr_now() completes when the last LVGL stripe has been copied into
+// the DPI framebuffer, not when the continuously-scanning panel has shown
+// that stripe. The verified 34 MHz / 576x976 total timing is a 16.53 ms
+// frame; 40 ms plus one scheduler tick below guarantees more than two full
+// scans before the backlight can reveal the framebuffer.
+#define DISPLAY_BOOT_SCANOUT_GUARD_MS 40
 // Settings > Display's slider floor and the fixed level night mode dims to -
 // same value on purpose, so night mode is never brighter than the user's own
 // minimum and there's only one "how dim can this get" constant to reason about.
@@ -6186,7 +6194,14 @@ static void display_ui_render(void)
 
     settings_store_load_locale(&s_locale); // the Time screens below need it for their initial checkmarks
     settings_store_load_display(&s_display); // the Display screen below needs it for its initial slider/checks
-    display_apply_brightness(); // correct the full-duty board_jc4880p443c_backlight_on() from display_ui_start()
+    // Deliberately NOT calling display_apply_brightness() here: this call
+    // predates the backlight-after-render reorder (it "corrected" a
+    // full-duty backlight_on() that used to run *before* render), and left
+    // in place it became the thing that turned the panel on - at the very
+    // start of render, while the framebuffer still held LVGL's light default
+    // screen - producing a 1-2s white screen at every boot. The backlight
+    // now comes on in display_ui_start(), after the first dark frame has
+    // actually been flushed to the panel.
 
     int64_t __render_t0 = esp_timer_get_time();
     warm_up_lvgl_widget_classes(screen);
@@ -6237,25 +6252,37 @@ esp_err_t display_ui_start(void)
         return ESP_FAIL;
     }
     display_ui_render();
+    // Force the first frame into the DPI framebuffer before the backlight
+    // comes on. Building the widget tree above only marks areas dirty; the
+    // actual draw + flush would otherwise happen on esp_lvgl_port's task
+    // after this lock is released. lv_refr_now() synchronously renders every
+    // invalid 40px stripe and waits for each on_color_trans_done callback,
+    // which means the pixels are safely copied into the framebuffer. It does
+    // not mean the continuously-scanning DPI panel has presented them yet;
+    // that separate scanout boundary is covered immediately after unlock.
+    int64_t first_frame_t0 = esp_timer_get_time();
+    lv_refr_now(display);
+    ESP_LOGI(TAG, "display_ui_start: first frame copied to framebuffer in %lld ms",
+             (esp_timer_get_time() - first_frame_t0) / 1000);
     board_jc4880p443c_display_unlock();
 
-    // Backlight only turns on now, after the real dashboard has been built
-    // and unlocked for esp_lvgl_port's background task to flush - not
-    // before. The ST7701 panel is already logically "on" (its own init
-    // command sequence includes a display-on command) the moment
-    // board_jc4880p443c_display_start() above returns, and esp_lvgl_port's
-    // background task can flush LVGL's default (light-themed) screen the
-    // instant the display is registered - both well before
-    // display_ui_render() gets a chance to build anything. Turning the
-    // backlight on this late means the user only ever sees the real, dark,
-    // populated dashboard - not a flash of the light default theme, nor a
-    // half-built screen while display_ui_render() is still working. Note
-    // display_ui_render() building all 16 Settings/dashboard screens up
-    // front is itself slow (multiple seconds) since the LVGL object pool
-    // moved to PSRAM (see sdkconfig.defaults' CONFIG_LV_MEM_SIZE_KILOBYTES
-    // comment) - this fix removes the white/light flash during that window,
-    // it does not shorten the window itself.
-    ESP_RETURN_ON_ERROR(board_jc4880p443c_backlight_on(), TAG, "turn on backlight");
+    // on_color_trans_done only says the source draw buffer can be recycled;
+    // ESP-IDF explicitly does not promise that the internal framebuffer has
+    // finished refreshing to the screen. With the 180-degree software
+    // rotation, the final logical 40px status-bar stripe maps to the panel's
+    // first native scan lines. If scanout has already passed those lines,
+    // enabling the backlight immediately can reveal their previous light
+    // contents until the next frame. Wait for more than two complete scans;
+    // the extra tick prevents tick-phase truncation from shortening 40 ms.
+    vTaskDelay(pdMS_TO_TICKS(DISPLAY_BOOT_SCANOUT_GUARD_MS) + 1U);
+
+    // Straight to the user's saved brightness (and night-mode window, if
+    // active) rather than board_jc4880p443c_backlight_on()'s fixed 100% -
+    // going to full duty first would show a visible brightness dip one
+    // update-timer tick later when display_apply_brightness() corrected it.
+    // s_display was loaded by display_ui_render() above; this touches only
+    // LEDC, no LVGL objects, so it's safe outside the lock.
+    display_apply_brightness();
 
     ESP_LOGI(TAG, "Display UI started.");
     return ESP_OK;

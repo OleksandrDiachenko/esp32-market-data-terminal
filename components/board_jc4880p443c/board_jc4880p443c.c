@@ -1,7 +1,9 @@
 #include "board_jc4880p443c.h"
 
+#include "driver/gpio.h"
 #include "driver/i2c_master.h"
 #include "driver/ledc.h"
+#include "esp_cache.h"
 #include "esp_check.h"
 #include "esp_lcd_mipi_dsi.h"
 #include "esp_lcd_panel_io.h"
@@ -11,6 +13,8 @@
 #include "esp_ldo_regulator.h"
 #include "esp_log.h"
 #include "esp_lvgl_port.h"
+
+#include <string.h>
 
 static const char *TAG = "board_jc4880p443c";
 
@@ -105,7 +109,13 @@ static esp_err_t backlight_pwm_init(void)
         .channel = BOARD_LCD_BRIGHTNESS_LEDC_CHANNEL,
         .intr_type = LEDC_INTR_DISABLE,
         .timer_sel = BOARD_LCD_BRIGHTNESS_LEDC_TIMER,
-        .duty = 1023,
+        // Off until the app explicitly lights it (display_ui_start(), after
+        // the first real frame has been flushed to the panel). duty = 1023
+        // here lit the backlight to 100% as a side effect of LEDC channel
+        // init - seconds before any content existed - which is what made the
+        // boot white-screen survive every attempt to fix it by reordering
+        // the *later* backlight calls.
+        .duty = 0,
         .hpoint = 0,
     };
 
@@ -241,6 +251,26 @@ esp_err_t board_jc4880p443c_display_start(lv_display_t **out_display)
     ESP_RETURN_ON_ERROR(panel_new(&panel, &io), TAG, "bring up ST7701 panel");
     ESP_LOGI(TAG, "ST7701 panel initialized: %dx%d", BOARD_JC4880P443C_LCD_H_RES, BOARD_JC4880P443C_LCD_V_RES);
 
+    // The DPI peripheral starts scanning this framebuffer out to the panel
+    // continuously from here on, and nothing guarantees its initial content
+    // (or anything a pre-dashboard LVGL flush later leaves in it) is dark.
+    // Clear it to black so no boot-time frame can ever show light pixels -
+    // the backlight sequencing in display_ui_start() keeps the panel unlit
+    // until the first real frame, and this closes the remaining gap where a
+    // region the first flush hadn't covered yet (e.g. the status-bar-sized
+    // final render stripe) still held stale light content when the
+    // backlight came on.
+    void *fb0 = NULL;
+    ESP_RETURN_ON_ERROR(esp_lcd_dpi_panel_get_frame_buffer(panel, 1, &fb0), TAG, "get DPI framebuffer");
+    const size_t fb_bytes =
+        (size_t)BOARD_JC4880P443C_LCD_H_RES * BOARD_JC4880P443C_LCD_V_RES * (BOARD_LCD_BITS_PER_PIXEL / 8);
+    memset(fb0, 0, fb_bytes);
+    // The framebuffer lives in PSRAM behind the CPU data cache while the DPI
+    // engine reads physical memory - write the zeros back or the panel keeps
+    // scanning whatever was there before.
+    ESP_RETURN_ON_ERROR(esp_cache_msync(fb0, fb_bytes, ESP_CACHE_MSYNC_FLAG_DIR_C2M), TAG,
+                         "sync cleared framebuffer");
+
     lvgl_port_cfg_t lvgl_cfg = ESP_LVGL_PORT_INIT_CONFIG();
     ESP_RETURN_ON_ERROR(lvgl_port_init(&lvgl_cfg), TAG, "initialize LVGL port");
 
@@ -296,6 +326,23 @@ esp_err_t board_jc4880p443c_display_start(lv_display_t **out_display)
     // change here - see the touch_config.flags comment in
     // board_jc4880p443c_touch_start() below.
     lv_display_set_rotation(display, LV_DISPLAY_ROTATION_180);
+
+    // From this point the LVGL port task is free to render and flush the
+    // default screen at any moment - and LVGL's default theme is light. Make
+    // the not-yet-populated screen black so any flush that happens before
+    // display_ui builds the real UI paints black over the (also black -
+    // cleared above) framebuffer, never a light frame. display_ui restyles
+    // this same screen with its own palette when it builds the dashboard.
+    if (lvgl_port_lock(0))
+    {
+        lv_obj_t *scr = lv_display_get_screen_active(display);
+        if (scr != NULL)
+        {
+            lv_obj_set_style_bg_color(scr, lv_color_black(), 0);
+            lv_obj_set_style_bg_opa(scr, LV_OPA_COVER, 0);
+        }
+        lvgl_port_unlock();
+    }
 
     *out_display = display;
     return ESP_OK;
@@ -358,6 +405,19 @@ esp_err_t board_jc4880p443c_touch_start(lv_display_t *display, lv_indev_t **out_
 
     *out_indev = indev;
     return ESP_OK;
+}
+
+esp_err_t board_jc4880p443c_backlight_early_off(void)
+{
+    const gpio_config_t cfg = {
+        .pin_bit_mask = 1ULL << BOARD_LCD_BACKLIGHT_GPIO,
+        .mode = GPIO_MODE_OUTPUT,
+        .pull_up_en = GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE,
+    };
+    ESP_RETURN_ON_ERROR(gpio_config(&cfg), TAG, "configure backlight GPIO");
+    return gpio_set_level(BOARD_LCD_BACKLIGHT_GPIO, 0);
 }
 
 esp_err_t board_jc4880p443c_backlight_on(void)
