@@ -5417,9 +5417,10 @@ static void build_time_format_screen(lv_obj_t *screen)
     lv_obj_t *body =
         build_time_subscreen(screen, &s_time_format_screen, "Time format", NULL, NULL, time_format_back_cb);
 
-    build_time_toggle_row(body, "12-hour", time_format_row_click_cb, (void *)(uintptr_t)false,
+    build_time_toggle_row(body, "12-hour", time_format_row_click_cb, (void *)(uintptr_t) false,
                           &s_time_format_check_12h);
-    build_time_toggle_row(body, "24-hour", time_format_row_click_cb, (void *)(uintptr_t)true, &s_time_format_check_24h);
+    build_time_toggle_row(body, "24-hour", time_format_row_click_cb, (void *)(uintptr_t) true,
+                          &s_time_format_check_24h);
 
     time_format_refresh_marks();
 }
