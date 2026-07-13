@@ -2,7 +2,7 @@
 
 ## Goal
 
-Build an ESP-IDF based ESP32-P4 market data terminal as a professional embedded firmware portfolio project.
+Build Market Data Ticker, an ESP-IDF based ESP32-P4 market data terminal, as a professional embedded firmware portfolio project.
 
 ## Current status
 

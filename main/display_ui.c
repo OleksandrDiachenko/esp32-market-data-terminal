@@ -4517,7 +4517,7 @@ static void build_about_screen(lv_obj_t *screen)
     lv_obj_t *name_label = lv_label_create(content);
     lv_obj_set_style_text_color(name_label, COLOR_TEXT, 0);
     lv_obj_set_style_text_font(name_label, &lv_font_montserrat_18, 0);
-    lv_label_set_text(name_label, "ESP32 Market Data Terminal");
+    lv_label_set_text(name_label, "Market Data Ticker");
 
     const esp_app_desc_t *running = esp_app_get_description();
     lv_obj_t *version_label = lv_label_create(content);
