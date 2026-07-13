@@ -1679,6 +1679,10 @@ static void style_dark_textarea(lv_obj_t *ta)
     lv_obj_set_style_text_color(ta, COLOR_TEXT, 0);
     lv_obj_set_style_text_font(ta, &lv_font_montserrat_16, 0);
     lv_obj_set_style_text_color(ta, COLOR_MUTED, LV_PART_TEXTAREA_PLACEHOLDER);
+    // All textareas using this helper are single-line inputs. LVGL's AUTO
+    // scrollbar briefly appears at their right edge during initial layout;
+    // hide the indicator while retaining the textarea's internal scrolling.
+    lv_obj_set_scrollbar_mode(ta, LV_SCROLLBAR_MODE_OFF);
     // A thin 2px I-beam, not a filled block - and gated to LV_STATE_FOCUSED
     // specifically, otherwise it was rendering as a static, non-blinking
     // artifact on whichever field *didn't* have focus too (the un-gated
