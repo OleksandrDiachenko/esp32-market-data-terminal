@@ -2436,8 +2436,16 @@ static void wifi_ap_click_cb(lv_event_t *e)
 
     strncpy(s_wifi_pending_ssid, ctx->ssid, WIFI_MANAGER_SSID_MAX);
     s_wifi_pending_ssid[WIFI_MANAGER_SSID_MAX] = '\0';
-    lv_textarea_set_text(s_wifi_password_input, "");
+    // set_ssid first: it's what ensure_settings_view_built()s the password
+    // screen, so s_wifi_password_input is NULL until it runs - the same
+    // touch-a-widget-before-building-it ordering bug ADR 0012 documents
+    // fixing in cmd_nav's "wifi_password" target, missed here (this path is
+    // only reachable by a physical tap, which the nav-sweep verification
+    // didn't cover). Cleared the device hanging in LV_ASSERT_NULL's trap
+    // (holding the LVGL lock, so touch/console die with it) on every tap of
+    // an unsaved network.
     wifi_password_screen_set_ssid(s_wifi_pending_ssid, true);
+    lv_textarea_set_text(s_wifi_password_input, "");
     show_settings_view(SETTINGS_VIEW_WIFI_PASSWORD);
     wifi_password_screen_focus_default_field(s_wifi_password_input); // SSID is fixed/known - password is the only thing left to type
 }
@@ -2503,8 +2511,10 @@ static void wifi_add_network_click_cb(lv_event_t *e)
 {
     (void)e;
     s_wifi_pending_ssid[0] = '\0';
-    lv_textarea_set_text(s_wifi_password_input, "");
+    // set_ssid before touching s_wifi_password_input - see wifi_ap_click_cb()'s
+    // comment; identical ordering bug, identical every-tap hang.
     wifi_password_screen_set_ssid("", false);
+    lv_textarea_set_text(s_wifi_password_input, "");
     show_settings_view(SETTINGS_VIEW_WIFI_PASSWORD);
     wifi_password_screen_focus_default_field(s_wifi_ssid_input); // SSID is empty here - fill it in first
 }
