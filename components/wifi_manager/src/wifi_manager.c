@@ -118,6 +118,41 @@ static void publish_event(wifi_manager_event_id_t id, const char *ssid);
 static wifi_manager_event_id_t map_policy_event(wifi_policy_event_t event);
 static wifi_manager_state_t map_policy_state(wifi_policy_state_t state);
 static esp_err_t enqueue_cmd(const wifi_mgr_cmd_t *cmd);
+static void cleanup_init_resources(void);
+
+static void cleanup_init_resources(void)
+{
+    if (scan_timeout_timer != NULL)
+    {
+        esp_timer_delete(scan_timeout_timer);
+        scan_timeout_timer = NULL;
+    }
+    if (retry_timer != NULL)
+    {
+        esp_timer_delete(retry_timer);
+        retry_timer = NULL;
+    }
+    if (connect_timeout_timer != NULL)
+    {
+        esp_timer_delete(connect_timeout_timer);
+        connect_timeout_timer = NULL;
+    }
+    if (snapshot_mutex != NULL)
+    {
+        vSemaphoreDelete(snapshot_mutex);
+        snapshot_mutex = NULL;
+    }
+    if (event_queue != NULL)
+    {
+        vQueueDelete(event_queue);
+        event_queue = NULL;
+    }
+    if (cmd_queue != NULL)
+    {
+        vQueueDelete(cmd_queue);
+        cmd_queue = NULL;
+    }
+}
 
 static void start_connect_timeout_timer(void)
 {
@@ -465,7 +500,8 @@ static void execute_connect(const char *ssid, wifi_policy_origin_t origin)
         ESP_LOGW(TAG, "No stored password for '%s'; attempting open connection", ssid);
     }
 
-    wifi_config_t wifi_config = {0};
+    wifi_config_t wifi_config;
+    memset(&wifi_config, 0, sizeof(wifi_config));
     strncpy((char *)wifi_config.sta.ssid, ssid, sizeof(wifi_config.sta.ssid) - 1);
     if (have_password)
     {
@@ -940,7 +976,17 @@ static void wifi_mgr_task(void *arg)
     }
 }
 
-// --- event handlers / timer callbacks (ISR-safe: only enqueue) -----------
+// --- event handlers / timer callbacks (non-blocking: only enqueue) --------
+
+static void enqueue_internal_cmd(const wifi_mgr_cmd_t *cmd)
+{
+    esp_err_t err = enqueue_cmd(cmd);
+    if (err != ESP_OK)
+    {
+        ESP_LOGE(TAG, "Internal command queue full/unavailable; dropped kind=%d: %s", (int)cmd->kind,
+                 esp_err_to_name(err));
+    }
+}
 
 static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data)
 {
@@ -965,7 +1011,7 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t e
     {
         return;
     }
-    xQueueSend(cmd_queue, &cmd, 0);
+    enqueue_internal_cmd(&cmd);
 }
 
 static void ip_event_handler(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data)
@@ -977,28 +1023,28 @@ static void ip_event_handler(void *arg, esp_event_base_t event_base, int32_t eve
         return;
     }
     wifi_mgr_cmd_t cmd = {.kind = CMD_IP_GOT_IP};
-    xQueueSend(cmd_queue, &cmd, 0);
+    enqueue_internal_cmd(&cmd);
 }
 
 static void connect_timeout_cb(void *arg)
 {
     (void)arg;
     wifi_mgr_cmd_t cmd = {.kind = CMD_CONNECT_TIMEOUT};
-    xQueueSend(cmd_queue, &cmd, 0);
+    enqueue_internal_cmd(&cmd);
 }
 
 static void retry_timer_cb(void *arg)
 {
     (void)arg;
     wifi_mgr_cmd_t cmd = {.kind = CMD_RETRY_TIMER_EXPIRED};
-    xQueueSend(cmd_queue, &cmd, 0);
+    enqueue_internal_cmd(&cmd);
 }
 
 static void scan_timeout_cb(void *arg)
 {
     (void)arg;
     wifi_mgr_cmd_t cmd = {.kind = CMD_SCAN_TIMEOUT};
-    xQueueSend(cmd_queue, &cmd, 0);
+    enqueue_internal_cmd(&cmd);
 }
 
 static esp_err_t enqueue_cmd(const wifi_mgr_cmd_t *cmd)
@@ -1014,16 +1060,21 @@ static esp_err_t enqueue_cmd(const wifi_mgr_cmd_t *cmd)
 
 esp_err_t wifi_manager_init(void)
 {
-    if (cmd_queue != NULL)
+    if (wifi_mgr_task_handle != NULL)
     {
         return ESP_OK;
     }
+
+    // Recover cleanly if a previous initialization attempt failed after
+    // creating only some of the queues/timers.
+    cleanup_init_resources();
 
     cmd_queue = xQueueCreate(WIFI_MGR_CMD_QUEUE_LEN, sizeof(wifi_mgr_cmd_t));
     event_queue = xQueueCreate(WIFI_MGR_EVENT_QUEUE_LEN, sizeof(wifi_manager_event_t));
     snapshot_mutex = xSemaphoreCreateMutex();
     if (cmd_queue == NULL || event_queue == NULL || snapshot_mutex == NULL)
     {
+        cleanup_init_resources();
         return ESP_ERR_NO_MEM;
     }
 
@@ -1034,6 +1085,7 @@ esp_err_t wifi_manager_init(void)
         esp_timer_create(&retry_timer_args, &retry_timer) != ESP_OK ||
         esp_timer_create(&scan_timer_args, &scan_timeout_timer) != ESP_OK)
     {
+        cleanup_init_resources();
         return ESP_FAIL;
     }
 
@@ -1052,6 +1104,7 @@ esp_err_t wifi_manager_init(void)
     if (xTaskCreate(wifi_mgr_task, "wifi_mgr", WIFI_MGR_TASK_STACK_SIZE, NULL, WIFI_MGR_TASK_PRIORITY,
                     &wifi_mgr_task_handle) != pdPASS)
     {
+        cleanup_init_resources();
         return ESP_ERR_NO_MEM;
     }
 

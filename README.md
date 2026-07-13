@@ -21,6 +21,7 @@ changes tracked in [docs/roadmap.md](docs/roadmap.md) and
   (see [docs/decisions/0009-regional-server-auto-selection.md](docs/decisions/0009-regional-server-auto-selection.md))
 - Over-the-air firmware updates via GitHub Releases
   (see [docs/decisions/0006-ota-firmware-update.md](docs/decisions/0006-ota-firmware-update.md))
+- Configurable display brightness and scheduled night mode
 
 ## Hardware
 
@@ -30,7 +31,7 @@ changes tracked in [docs/roadmap.md](docs/roadmap.md) and
 
 ## Toolchain
 
-- ESP-IDF: 6.0.1
+- ESP-IDF: 6.0.2
 - Build system: ESP-IDF CMake + Ninja
 - Language: C
 
@@ -39,7 +40,7 @@ changes tracked in [docs/roadmap.md](docs/roadmap.md) and
 Activate the ESP-IDF environment before building:
 
 ```sh
-. /Users/siswood/.espressif/v6.0.1/esp-idf/export.sh
+. "$HOME/.espressif/v6.0.2/esp-idf/export.sh"
 idf.py build
 ```
 
@@ -109,6 +110,8 @@ test/*      - tests
 Before opening a pull request:
 
 - Build passes with `idf.py build`
+- Host tests pass (commands are listed in [docs/testing.md](docs/testing.md))
+- Repo-wide clang-format and first-party cppcheck gates pass in CI
 - No local configuration or generated files are committed
 - Error paths are considered for firmware changes
 - Hardware test notes are added when hardware behavior changes

@@ -19,6 +19,10 @@ and runtime behavior on the real ESP32-P4 board.
 - [WebSocket kline_1s streaming](websocket-streaming-hardware-test.md)
 - [OTA firmware update](ota-firmware-update-hardware-test.md)
 - [Serial console USB-Serial-JTAG rebind](serial-console-usb-jtag-rebind-hardware-test.md)
+- [ESP-Hosted 2.12.9 slave packet mode](esp-hosted-2.12.9-slave-packet-mode-hardware-test.md)
+- [Dashboard UI with live data](dashboard-ui-hardware-test.md)
+- [Regional server auto-selection](regional-server-auto-selection-hardware-test.md)
+- [Pre-Phase 17 release readiness](pre-phase-17-release-readiness.md)
 
 ## Report Template
 

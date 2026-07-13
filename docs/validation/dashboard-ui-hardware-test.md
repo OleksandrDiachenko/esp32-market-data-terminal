@@ -18,8 +18,8 @@
 The device was already running normally (Wi-Fi connected, watchlist
 bootstrapped, WS ticking) when this validation started, so no
 flash/reboot was needed - screenshots were captured directly off the live
-screen with the [`dev-screenshot`](../../.claude/skills/dev-screenshot)
-skill (`tools/dev_screenshot.py`, local-only
+screen with the [device screenshot workflow](../development/device-screenshot.md)
+(`tools/dev_screenshot.py`, local-only
 `CONFIG_DEV_SCREENSHOT_CONSOLE=y`, not part of the shipped
 `sdkconfig.defaults`). `--nav` was used to switch screens for the
 Settings capture instead of a physical tap.

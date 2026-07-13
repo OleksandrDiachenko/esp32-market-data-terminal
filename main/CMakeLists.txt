@@ -4,6 +4,7 @@ idf_component_register(
         "startup_diagnostics.c"
         "app_lifecycle.c"
         "display_ui.c"
+        "display_ui_logic.c"
         "dev_console.c"
         "dev_screenshot_console.c"
     INCLUDE_DIRS

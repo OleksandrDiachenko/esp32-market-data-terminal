@@ -62,6 +62,10 @@ static void wait_for_wifi_connected(void)
 static QueueHandle_t start_ws_client(QueueSetHandle_t queue_set)
 {
     uint8_t count = app_state_symbol_count();
+    if (count == 0)
+    {
+        return NULL;
+    }
     char symbol_storage[APP_STATE_MAX_SYMBOLS][SETTINGS_SYMBOL_MAX_LEN + 1];
     const char *symbols[APP_STATE_MAX_SYMBOLS];
     for (uint8_t i = 0; i < count; i++)
@@ -83,11 +87,13 @@ static QueueHandle_t start_ws_client(QueueSetHandle_t queue_set)
     if (updates == NULL)
     {
         ESP_LOGE(TAG, "No update queue after create");
+        market_data_ws_client_stop();
         return NULL;
     }
     if (queue_set != NULL && xQueueAddToSet(updates, queue_set) != pdPASS)
     {
         ESP_LOGE(TAG, "Failed to join update queue to the queue set");
+        market_data_ws_client_stop();
         return NULL;
     }
 
@@ -99,6 +105,7 @@ static QueueHandle_t start_ws_client(QueueSetHandle_t queue_set)
         {
             xQueueRemoveFromSet(updates, queue_set);
         }
+        market_data_ws_client_stop();
         return NULL;
     }
     return updates;
@@ -121,10 +128,24 @@ static void ws_task_fn(void *arg)
         queue_set = NULL;
     }
 
-    QueueHandle_t updates = start_ws_client(queue_set);
-    if (updates == NULL)
+    QueueHandle_t updates = NULL;
+    if (app_state_symbol_count() > 0)
     {
-        ESP_LOGW(TAG, "WS client start failed; WS consumer task exiting");
+        updates = start_ws_client(queue_set);
+        if (updates == NULL && queue_set == NULL)
+        {
+            ESP_LOGW(TAG, "WS client start failed; WS consumer task exiting");
+            vTaskDelete(NULL);
+            return;
+        }
+    }
+    else
+    {
+        ESP_LOGI(TAG, "Watchlist is empty; waiting for the first symbol before starting WebSocket");
+    }
+    if (queue_set == NULL && updates == NULL)
+    {
+        ESP_LOGE(TAG, "Cannot observe watchlist changes without a queue set; WS consumer task exiting");
         vTaskDelete(NULL);
         return;
     }
@@ -148,7 +169,7 @@ static void ws_task_fn(void *arg)
         }
 
         QueueSetMemberHandle_t activated = xQueueSelectFromSet(queue_set, portMAX_DELAY);
-        if (activated == updates)
+        if (updates != NULL && activated == updates)
         {
             if (xQueueReceive(updates, &update, 0) == pdTRUE)
             {
@@ -165,28 +186,60 @@ static void ws_task_fn(void *arg)
             {
                 if (watchlist_event.kind == APP_STATE_WATCHLIST_SYMBOL_ADDED)
                 {
-                    market_data_ws_client_subscribe(watchlist_event.symbol);
+                    if (updates == NULL)
+                    {
+                        updates = start_ws_client(queue_set);
+                        if (updates == NULL)
+                        {
+                            ESP_LOGW(TAG, "Failed to start WS client for the first watchlist symbol");
+                        }
+                    }
+                    else
+                    {
+                        esp_err_t err = market_data_ws_client_subscribe(watchlist_event.symbol);
+                        if (err != ESP_OK)
+                        {
+                            ESP_LOGW(TAG, "WS subscribe failed for '%s': %s", watchlist_event.symbol,
+                                     esp_err_to_name(err));
+                        }
+                    }
                 }
                 else if (watchlist_event.kind == APP_STATE_WATCHLIST_SYMBOL_REMOVED)
                 {
-                    market_data_ws_client_unsubscribe(watchlist_event.symbol);
+                    if (updates != NULL)
+                    {
+                        esp_err_t err = market_data_ws_client_unsubscribe(watchlist_event.symbol);
+                        if (err != ESP_OK)
+                        {
+                            ESP_LOGW(TAG, "WS unsubscribe failed for '%s': %s", watchlist_event.symbol,
+                                     esp_err_to_name(err));
+                        }
+                        else if (app_state_symbol_count() == 0)
+                        {
+                            // Keep the now-idle client/queue attached to the set. The next
+                            // add can SUBSCRIBE immediately, and we avoid deleting a queue
+                            // that may still have an already-enqueued final tick.
+                            ESP_LOGI(TAG, "Watchlist is empty; WebSocket remains idle until a symbol is added");
+                        }
+                    }
                 }
                 else // APP_STATE_REGION_CHANGED
                 {
                     ESP_LOGI(TAG, "API region changed; reconnecting WS client against the new host");
-                    xQueueRemoveFromSet(updates, queue_set);
-                    market_data_ws_client_stop();
-                    QueueHandle_t new_updates = start_ws_client(queue_set);
-                    if (new_updates == NULL)
+                    if (updates != NULL)
                     {
-                        // The old client/queue are already destroyed - nothing
-                        // left to safely fall back to, unlike the boot-time
-                        // failure path's plain-queue option.
-                        ESP_LOGE(TAG, "Failed to reconnect WS client after region change; WS consumer task exiting");
-                        vTaskDelete(NULL);
-                        return;
+                        xQueueRemoveFromSet(updates, queue_set);
+                        market_data_ws_client_stop();
+                        updates = NULL;
                     }
-                    updates = new_updates;
+                    if (app_state_symbol_count() > 0)
+                    {
+                        updates = start_ws_client(queue_set);
+                        if (updates == NULL)
+                        {
+                            ESP_LOGE(TAG, "Failed to reconnect WS client after region change");
+                        }
+                    }
                 }
             }
         }
@@ -195,12 +248,6 @@ static void ws_task_fn(void *arg)
 
 esp_err_t app_state_ws_task_start(void)
 {
-    if (app_state_symbol_count() == 0)
-    {
-        ESP_LOGW(TAG, "Watchlist is empty; not starting the WebSocket task");
-        return ESP_OK;
-    }
-
     BaseType_t ok = xTaskCreate(ws_task_fn, "app_state_ws", WS_TASK_STACK_SIZE, NULL, WS_TASK_PRIORITY, NULL);
     return (ok == pdPASS) ? ESP_OK : ESP_ERR_NO_MEM;
 }

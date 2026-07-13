@@ -9,7 +9,8 @@ into a PNG file.
 Pass --nav to first send the "nav" console command (registered by
 display_ui_register_dev_nav_console() in main/display_ui.c, same build gate)
 so the device jumps to a specific screen before capturing - no physical tap
-needed. Valid targets: watchlist, settings, wifi, wifi_password [ssid].
+needed. Run with ``--help`` for the complete target list; it mirrors every
+lazy screen registered by ``display_ui_register_dev_nav_console()``.
 
 Wire format (see dev_screenshot_console.c for the firmware side):
 

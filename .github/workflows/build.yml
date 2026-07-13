@@ -20,6 +20,12 @@ jobs:
           target: esp32p4
           path: '.'
 
+      - name: Install cppcheck
+        run: sudo apt-get update && sudo apt-get install -y cppcheck
+
+      - name: Analyze first-party ESP-IDF code
+        run: bash tools/run_first_party_cppcheck.sh build/compile_commands.json
+
   host-tests:
     runs-on: ubuntu-latest
     steps:
@@ -47,6 +53,9 @@ jobs:
       - name: Run display_format host tests
         run: make -C components/display_format/host_test test
 
+      - name: Run display_ui_logic host tests
+        run: make -C main/host_test test
+
   cppcheck:
     runs-on: ubuntu-latest
     steps:
@@ -72,6 +81,7 @@ jobs:
             -I components/app_state/src -I components/app_state/include \
             -I components/ota_client/src -I components/ota_client/include \
             -I components/display_format/src -I components/display_format/include \
+            -I main \
             components/wifi_manager/src/wifi_policy.c \
             components/wifi_manager/src/wifi_profile_codec.c \
             components/settings_store/src/settings_codec.c \
@@ -86,7 +96,8 @@ jobs:
             components/app_state/src/app_state_retry_policy.c \
             components/app_state/src/app_state_kline_merge.c \
             components/ota_client/src/ota_client_json.c \
-            components/display_format/src/display_format.c
+            components/display_format/src/display_format.c \
+            main/display_ui_logic.c
 
   format-check:
     runs-on: ubuntu-latest
@@ -97,11 +108,7 @@ jobs:
       - name: Install clang-format
         run: sudo apt-get update && sudo apt-get install -y clang-format
 
-      # Report-only: no .clang-format existed before this phase, so a
-      # repo-wide dry-run diff hasn't been reviewed yet. This job surfaces
-      # drift on every PR without blocking merges; flipping it to blocking
-      # is a deliberate future step once that diff has been reviewed.
-      - name: Check formatting (non-blocking)
-        continue-on-error: true
+      - name: Check formatting
         run: |
-          find components main -name '*.c' -o -name '*.h' | xargs clang-format --dry-run --Werror -style=file
+          find components main -type f \( -name '*.c' -o -name '*.h' \) -print0 \
+            | xargs -0 clang-format --dry-run --Werror -style=file

@@ -8,35 +8,13 @@
 #include "dev_console.h"
 #include "dev_screenshot_console.h"
 #include "display_ui.h"
-#include "settings_store.h"
 #include "time_sync.h"
 #include "wifi_manager.h"
 
 #include "esp_log.h"
 #include "esp_ota_ops.h"
 
-#include <string.h>
-
 static const char *TAG = "market_terminal";
-
-// TEMPORARY - remove once the Add Symbol screen ships (Phase 11 slice 4,
-// next PR). SETTINGS_SYMBOLS_VERSION bumping alongside the 8->10 limit
-// change (docs/decisions/0007-watchlist-management.md) invalidated any
-// previously-persisted watchlist blob - correct, documented behavior, but
-// it leaves the device with an empty watchlist and no UI yet to repopulate
-// it. Re-seeds the same two symbols the watchlist was originally
-// provisioned with for Phase 8 hardware testing (see
-// docs/validation/app-state-runtime-hardware-test.md) via
-// settings_store_save_symbols() directly, the same way it was done then.
-static void reseed_watchlist_after_schema_bump(void)
-{
-    symbol_settings_t seed;
-    settings_symbols_init_default(&seed);
-    seed.count = 2;
-    strncpy(seed.symbols[0].ticker, "BTCUSDT", SETTINGS_SYMBOL_MAX_LEN);
-    strncpy(seed.symbols[1].ticker, "ETHUSDT", SETTINGS_SYMBOL_MAX_LEN);
-    settings_store_save_symbols(&seed);
-}
 
 void app_main(void)
 {
@@ -94,16 +72,6 @@ void app_main(void)
     if (time_sync_start() != ESP_OK)
     {
         ESP_LOGW(TAG, "Time sync failed to start; continuing with unsynced clock");
-    }
-
-    // See reseed_watchlist_after_schema_bump()'s comment - only fires once,
-    // while the watchlist is still empty from the schema bump; harmless no-op
-    // otherwise (including once real symbols are added later).
-    symbol_settings_t current_symbols;
-    settings_store_load_symbols(&current_symbols);
-    if (current_symbols.count == 0)
-    {
-        reseed_watchlist_after_schema_bump();
     }
 
     // app_state_init() only touches NVS/PSRAM (no network), so unlike
