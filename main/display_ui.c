@@ -8,6 +8,8 @@
 #include "esp_check.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "lvgl.h"
 #include "ota_client.h"
 #include "sdkconfig.h"
@@ -19,6 +21,10 @@
 #if CONFIG_DEV_SCREENSHOT_CONSOLE
 #include "esp_console.h"
 #endif
+
+// ui_mem_collect() (see its definition) always needs this, regardless of
+// CONFIG_UI_DIAGNOSTICS - the dev console's "memlog" command uses it too.
+#include "esp_heap_caps.h"
 
 #include <ctype.h>
 #include <math.h>
@@ -41,6 +47,12 @@ static const char *TAG = "display_ui";
 #define TIME_LIST_ROW_HEIGHT_PX 60 // Time format / Date format / Time zones list rows
 #define WIFI_PASSWORD_FIELD_HEIGHT_PX 54 // matches the eye-toggle button below it
 #define UPDATE_PERIOD_MS 1000
+// lv_refr_now() completes when the last LVGL stripe has been copied into
+// the DPI framebuffer, not when the continuously-scanning panel has shown
+// that stripe. The verified 34 MHz / 576x976 total timing is a 16.53 ms
+// frame; 40 ms plus one scheduler tick below guarantees more than two full
+// scans before the backlight can reveal the framebuffer.
+#define DISPLAY_BOOT_SCANOUT_GUARD_MS 40
 // Settings > Display's slider floor and the fixed level night mode dims to -
 // same value on purpose, so night mode is never brighter than the user's own
 // minimum and there's only one "how dim can this get" constant to reason about.
@@ -333,6 +345,112 @@ static lv_obj_t *s_updates_action_label;
 // --- About (Settings > About) ---
 
 static lv_obj_t *s_about_screen;
+
+// LVGL pool / internal-RAM / PSRAM headroom plus UI-side context, so a
+// hardware run can be correlated against the worst-case scenarios from
+// docs/debugging/wifi-nav-pool-exhaustion.md without needing a debugger.
+// Internal and PSRAM are measured with two separate heap_caps_get_*() calls,
+// not one call with MALLOC_CAP_INTERNAL | MALLOC_CAP_SPIRAM ORed together -
+// that flag combination means "capable of both simultaneously" (i.e. neither
+// region alone, since they're disjoint), not "either region". Always
+// compiled (not gated on CONFIG_UI_DIAGNOSTICS) since the dev console's
+// on-demand "memlog" command (cmd_memlog(), gated only on
+// CONFIG_DEV_SCREENSHOT_CONSOLE, near cmd_nav further down) needs it
+// independently of whether automatic periodic logging is enabled.
+typedef struct
+{
+    lv_mem_monitor_t lvgl;
+    size_t internal_free;
+    size_t internal_largest;
+    size_t internal_min_free;
+    size_t psram_free;
+    size_t psram_largest;
+    size_t psram_min_free;
+    int settings_view;
+    unsigned wifi_rows;
+    // Should never exceed 1 - the lazy-lifecycle invariant this whole effort
+    // is built on (see docs/decisions/0012-lazy-settings-screen-lifecycle.md).
+    // A count of 2 means some code path built a sub-screen without going
+    // through destroy_settings_view() first, or a stale reference (like the
+    // async-rebuild race fixed just before this PR) survived a teardown.
+    int resident_subscreens;
+} ui_mem_snapshot_t;
+
+static void ui_mem_collect(ui_mem_snapshot_t *out)
+{
+    lv_mem_monitor(&out->lvgl);
+    out->internal_free = heap_caps_get_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    out->internal_largest = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    out->internal_min_free = heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    out->psram_free = heap_caps_get_free_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    out->psram_largest = heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    out->psram_min_free = heap_caps_get_minimum_free_size(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    out->settings_view = (int)s_settings_view;
+    out->wifi_rows = s_wifi_rendered_count;
+    out->resident_subscreens = (s_locale_screen != NULL) + (s_time_format_screen != NULL) +
+                                (s_date_format_screen != NULL) + (s_time_zone_screen != NULL) +
+                                (s_time_zone_city_screen != NULL) + (s_region_screen != NULL) +
+                                (s_display_screen != NULL) + (s_wifi_screen != NULL) +
+                                (s_wifi_password_screen != NULL) + (s_watchlist_manage_screen != NULL) +
+                                (s_watchlist_add_screen != NULL) + (s_updates_screen != NULL) +
+                                (s_about_screen != NULL);
+}
+
+// Thresholds derived from on-device measurement (see decision
+// 0012-lazy-settings-screen-lifecycle.md's "Amended" section): a full
+// WIFI_DISPLAY_ROWS_MAX (32) row Wi-Fi list - already the worst case this UI
+// can produce - safely completes at ~9-10KB free / ~7-8KB biggest free
+// block, stress-tested over 25 cycles with zero failures and no drift.
+// These floors sit below that observed-safe minimum, so normal operation -
+// including today's real worst case - never trips this guard; it exists as
+// defense-in-depth against a *worse* future scenario (more baseline screens
+// added later, a busier pool from other features) than what's been proven
+// safe, not to second-guess the current one. Not a guarantee against
+// allocation failure - the pool's state can still change between this check
+// and a row's last allocation - lazy lifecycle + bounded list sizes remain
+// the primary protection.
+#define UI_MEM_MIN_FREE_BYTES 4096
+#define UI_MEM_MIN_BIGGEST_BYTES 3072
+
+static bool ui_mem_can_build(const char *what)
+{
+    lv_mem_monitor_t mon;
+    lv_mem_monitor(&mon);
+    if (mon.free_size < UI_MEM_MIN_FREE_BYTES || mon.free_biggest_size < UI_MEM_MIN_BIGGEST_BYTES)
+    {
+        ESP_LOGW(TAG, "LVGL pool low, truncating %s (free=%u biggest=%u used_pct=%u%%)", what,
+                 (unsigned)mon.free_size, (unsigned)mon.free_biggest_size, (unsigned)mon.used_pct);
+        return false;
+    }
+    return true;
+}
+
+#if CONFIG_UI_DIAGNOSTICS
+// Automatic instrumentation call sites (update_timer_cb, show_settings_view,
+// Wi-Fi/Watchlist rebuilds) are gated on this option and log at ESP_LOGI, not
+// ESP_LOGD: this project's default CONFIG_LOG_MAXIMUM_LEVEL is INFO, which
+// compiles ESP_LOGD out entirely (not just filters it at runtime), so
+// CONFIG_UI_DIAGNOSTICS=y would otherwise silently produce nothing without
+// also raising the global log ceiling to DEBUG - which in turn collides with
+// an unrelated -Werror=use-after-free in the vendored esp_lcd_st7701_rgb.c
+// once DEBUG-level ESP_LOGD calls elsewhere in the tree compile in. INFO
+// keeps this option self-contained. See cmd_memlog() (further down, near
+// cmd_nav) for the always-available on-demand equivalent (plain printf,
+// unaffected by any of this).
+static void ui_log_lv_mem(const char *where)
+{
+    ui_mem_snapshot_t s;
+    ui_mem_collect(&s);
+    ESP_LOGI(TAG,
+             "uimem[%s] lvgl: used=%u%% free=%u biggest=%u frag=%u%% | "
+             "internal: free=%u largest=%u min=%u | psram: free=%u largest=%u min=%u | "
+             "view=%d wifi_rows=%u subscreens=%d",
+             where, (unsigned)s.lvgl.used_pct, (unsigned)s.lvgl.free_size, (unsigned)s.lvgl.free_biggest_size,
+             (unsigned)s.lvgl.frag_pct, (unsigned)s.internal_free, (unsigned)s.internal_largest,
+             (unsigned)s.internal_min_free, (unsigned)s.psram_free, (unsigned)s.psram_largest,
+             (unsigned)s.psram_min_free, s.settings_view, s.wifi_rows, s.resident_subscreens);
+}
+#endif // CONFIG_UI_DIAGNOSTICS
 
 // --- First-run-after-update disclaimer screen ---
 //
@@ -713,6 +831,14 @@ static lv_obj_t *s_wifi_menu_backdrop;
 static lv_obj_t *s_wifi_menu_card;
 static lv_obj_t *s_wifi_menu_ssid_label;
 static void destroy_date_format_view(void); // defined near s_date_format_checks[]'s declaration
+// destroy_settings_view() must cancel any watchlist rebuild queued via
+// schedule_watchlist_manage_rebuild() before tearing the screen down -
+// otherwise a Remove/drag followed by an instant Back leaves the async call
+// pending, and it later fires against a torn-down screen and silently
+// rebuilds (and re-shows behind the new view) a Watchlist Manage the user
+// already left. See watchlist_manage_rebuild_async()'s own guard for the
+// other half of this fix.
+static void watchlist_manage_rebuild_async(void *unused);
 
 // Builds the sub-screen for `view` if it doesn't exist yet (idempotent - a
 // no-op if already built). Called both by show_settings_view() and by every
@@ -907,6 +1033,10 @@ static void destroy_settings_view(settings_view_t view)
         }
         break;
     case SETTINGS_VIEW_WATCHLIST_MANAGE:
+        // Cancelled unconditionally, even if the screen was never built (or
+        // this is somehow reached with a NULL root) - a queued rebuild must
+        // never survive this view being torn down.
+        lv_async_call_cancel(watchlist_manage_rebuild_async, NULL);
         if (s_watchlist_manage_screen)
         {
             lv_obj_delete(s_watchlist_manage_screen);
@@ -1033,6 +1163,10 @@ static void show_settings_view(settings_view_t view)
     }
     lv_obj_add_flag(s_settings_list, LV_OBJ_FLAG_HIDDEN);
     lv_obj_remove_flag(target, LV_OBJ_FLAG_HIDDEN);
+
+#if CONFIG_UI_DIAGNOSTICS
+    ui_log_lv_mem("show_settings_view");
+#endif
 }
 
 static void set_active_screen(display_ui_screen_t screen)
@@ -1278,6 +1412,9 @@ static void watchlist_manage_rebuild(void);
 // is defensive hardening for a latent LVGL footgun - not the cause of the
 // crash/freeze bugs this file was audited for (that was LVGL-pool exhaustion,
 // fixed by moving the pool to PSRAM - see docs/debugging/wifi-nav-pool-exhaustion.md).
+// The deferral itself introduced a second footgun, fixed alongside this one:
+// see destroy_settings_view()'s SETTINGS_VIEW_WATCHLIST_MANAGE case and
+// watchlist_manage_rebuild_async()'s own guard below.
 static void schedule_watchlist_manage_rebuild(void);
 static void watchlist_add_screen_reset(void);
 
@@ -1311,6 +1448,15 @@ static void update_timer_cb(lv_timer_t *timer)
     {
         wifi_password_poll();
     }
+
+#if CONFIG_UI_DIAGNOSTICS
+    static uint8_t s_diag_tick;
+    if (++s_diag_tick >= 30) // ~30s at this timer's 1s period
+    {
+        s_diag_tick = 0;
+        ui_log_lv_mem("periodic");
+    }
+#endif
 }
 
 // Per-side hit-test padding (px). lv_obj_set_ext_click_area() alone can
@@ -1503,6 +1649,19 @@ static void make_plain_container(lv_obj_t *obj)
                                 LV_OBJ_FLAG_SCROLL_ELASTIC | LV_OBJ_FLAG_SCROLL_MOMENTUM | LV_OBJ_FLAG_SCROLL_CHAIN |
                                 LV_OBJ_FLAG_SCROLL_WITH_ARROW | LV_OBJ_FLAG_SNAPPABLE | LV_OBJ_FLAG_PRESS_LOCK |
                                 LV_OBJ_FLAG_GESTURE_BUBBLE);
+}
+
+// Appended by the Wi-Fi/Watchlist/time-zone-city list builders when
+// ui_mem_can_build() calls a halt partway through - a single label, cheap
+// enough to add even when the pool just failed that check for the next real
+// row's worth of widgets.
+static void build_truncated_row(lv_obj_t *parent)
+{
+    lv_obj_t *label = lv_label_create(parent);
+    lv_obj_set_style_text_color(label, COLOR_MUTED, 0);
+    lv_obj_set_style_pad_top(label, 8, 0);
+    lv_obj_set_style_pad_left(label, 18, 0);
+    lv_label_set_text(label, "...");
 }
 
 // lv_textarea/lv_keyboard both render with LVGL's built-in default theme
@@ -2285,8 +2444,16 @@ static void wifi_ap_click_cb(lv_event_t *e)
 
     strncpy(s_wifi_pending_ssid, ctx->ssid, WIFI_MANAGER_SSID_MAX);
     s_wifi_pending_ssid[WIFI_MANAGER_SSID_MAX] = '\0';
-    lv_textarea_set_text(s_wifi_password_input, "");
+    // set_ssid first: it's what ensure_settings_view_built()s the password
+    // screen, so s_wifi_password_input is NULL until it runs - the same
+    // touch-a-widget-before-building-it ordering bug ADR 0012 documents
+    // fixing in cmd_nav's "wifi_password" target, missed here (this path is
+    // only reachable by a physical tap, which the nav-sweep verification
+    // didn't cover). Cleared the device hanging in LV_ASSERT_NULL's trap
+    // (holding the LVGL lock, so touch/console die with it) on every tap of
+    // an unsaved network.
     wifi_password_screen_set_ssid(s_wifi_pending_ssid, true);
+    lv_textarea_set_text(s_wifi_password_input, "");
     show_settings_view(SETTINGS_VIEW_WIFI_PASSWORD);
     wifi_password_screen_focus_default_field(s_wifi_password_input); // SSID is fixed/known - password is the only thing left to type
 }
@@ -2352,8 +2519,10 @@ static void wifi_add_network_click_cb(lv_event_t *e)
 {
     (void)e;
     s_wifi_pending_ssid[0] = '\0';
-    lv_textarea_set_text(s_wifi_password_input, "");
+    // set_ssid before touching s_wifi_password_input - see wifi_ap_click_cb()'s
+    // comment; identical ordering bug, identical every-tap hang.
     wifi_password_screen_set_ssid("", false);
+    lv_textarea_set_text(s_wifi_password_input, "");
     show_settings_view(SETTINGS_VIEW_WIFI_PASSWORD);
     wifi_password_screen_focus_default_field(s_wifi_ssid_input); // SSID is empty here - fill it in first
 }
@@ -2836,13 +3005,24 @@ static void update_wifi_screen(void)
         lv_obj_set_style_pad_top(empty, 16, 0);
         lv_label_set_text(empty, "Scanning...");
         build_wifi_add_network_row(s_wifi_list);
+#if CONFIG_UI_DIAGNOSTICS
+        ui_log_lv_mem("wifi_rebuild_empty");
+#endif
         return;
     }
     for (uint8_t i = 0; i < new_count; i++)
     {
+        if (!ui_mem_can_build("wifi row"))
+        {
+            build_truncated_row(s_wifi_list);
+            break;
+        }
         build_wifi_ap_row(&new_rows[i], i);
     }
     build_wifi_add_network_row(s_wifi_list);
+#if CONFIG_UI_DIAGNOSTICS
+    ui_log_lv_mem("wifi_rebuild");
+#endif
 }
 
 static void wifi_row_click_cb(lv_event_t *e)
@@ -3425,6 +3605,11 @@ static void watchlist_manage_rebuild(void)
     lv_obj_clean(s_watchlist_list);
     for (uint8_t i = 0; i < count; i++)
     {
+        if (!ui_mem_can_build("watchlist row"))
+        {
+            build_truncated_row(s_watchlist_list);
+            break;
+        }
         app_state_symbol_meta_t meta;
         if (app_state_get_symbol_meta(i, &meta) != ESP_OK)
         {
@@ -3433,11 +3618,24 @@ static void watchlist_manage_rebuild(void)
         build_watchlist_symbol_row(meta.symbol, i);
     }
     build_watchlist_add_row(s_watchlist_list, count < SETTINGS_MAX_WATCHLIST);
+#if CONFIG_UI_DIAGNOSTICS
+    ui_log_lv_mem("watchlist_rebuild");
+#endif
 }
 
 static void watchlist_manage_rebuild_async(void *unused)
 {
     (void)unused;
+    // Belt-and-suspenders alongside destroy_settings_view()'s
+    // lv_async_call_cancel(): if this ever fires after the view has already
+    // been left (e.g. a cancel that raced a call already in LVGL's async
+    // queue), ensure_settings_view_built() inside watchlist_manage_rebuild()
+    // would otherwise silently rebuild - and re-show behind whatever's now
+    // active - a Watchlist Manage screen the user isn't on anymore.
+    if (s_settings_view != SETTINGS_VIEW_WATCHLIST_MANAGE)
+    {
+        return;
+    }
     watchlist_manage_rebuild();
 }
 
@@ -5365,6 +5563,11 @@ static void show_time_zone_cities(tz_zone_id_t zone)
         {
             continue;
         }
+        if (!ui_mem_can_build("time zone city row"))
+        {
+            build_truncated_row(s_time_zone_city_list);
+            break;
+        }
         char title_buf[48];
         snprintf(title_buf, sizeof(title_buf), "%s/%s", s_tz_zone_names[entry->zone], s_tz_city_names[entry->city]);
         // Matched on the exact "Zone/City" label the user picked, not on
@@ -5990,8 +6193,18 @@ static void display_ui_render(void)
     lv_obj_set_flex_flow(s_rows_container, LV_FLEX_FLOW_COLUMN);
 
     settings_store_load_locale(&s_locale); // the Time screens below need it for their initial checkmarks
-    settings_store_load_display(&s_display); // the Display screen below needs it for its initial slider/checks
-    display_apply_brightness(); // correct the full-duty board_jc4880p443c_backlight_on() from display_ui_start()
+    // s_display is loaded by display_ui_start() before the initial black
+    // frame is made visible. Keeping that early load there lets the
+    // backlight use the saved brightness without making the first scanout
+    // wait for any PSRAM-backed dashboard widget construction.
+    // Deliberately NOT calling display_apply_brightness() here: this call
+    // predates the backlight-after-render reorder (it "corrected" a
+    // full-duty backlight_on() that used to run *before* render), and left
+    // in place it became the thing that turned the panel on - at the very
+    // start of render, while the framebuffer still held LVGL's light default
+    // screen - producing a 1-2s white screen at every boot. The backlight
+    // now comes on in display_ui_start(), after the first dark frame has
+    // actually been flushed to the panel.
 
     int64_t __render_t0 = esp_timer_get_time();
     warm_up_lvgl_widget_classes(screen);
@@ -6036,31 +6249,59 @@ esp_err_t display_ui_start(void)
     lv_indev_t *touch_indev = NULL;
     ESP_RETURN_ON_ERROR(board_jc4880p443c_touch_start(display, &touch_indev), TAG, "start touch");
 
+    // The board layer has already cleared the single DPI framebuffer and
+    // styled LVGL's initial screen black. Load the saved brightness before
+    // making that known-black frame visible, but deliberately do not build
+    // the PSRAM-backed dashboard yet. This keeps the first visible scanout
+    // independent of the slow first-widget allocation path.
+    settings_store_load_display(&s_display);
+
     if (!board_jc4880p443c_display_lock(0))
     {
         ESP_LOGE(TAG, "failed to acquire LVGL lock");
         return ESP_FAIL;
     }
-    display_ui_render();
+
+    // Flush only the minimal black root before the backlight comes on.
+    // The old path built and synchronously rendered the whole dashboard here;
+    // with the LVGL pool in PSRAM its final 40px stripe could still expose a
+    // stale light scanout. The complete dashboard is constructed below while
+    // this verified-black frame remains on the panel.
+    int64_t first_frame_t0 = esp_timer_get_time();
+    lv_refr_now(display);
+    ESP_LOGI(TAG, "display_ui_start: black frame copied to framebuffer in %lld ms",
+             (esp_timer_get_time() - first_frame_t0) / 1000);
     board_jc4880p443c_display_unlock();
 
-    // Backlight only turns on now, after the real dashboard has been built
-    // and unlocked for esp_lvgl_port's background task to flush - not
-    // before. The ST7701 panel is already logically "on" (its own init
-    // command sequence includes a display-on command) the moment
-    // board_jc4880p443c_display_start() above returns, and esp_lvgl_port's
-    // background task can flush LVGL's default (light-themed) screen the
-    // instant the display is registered - both well before
-    // display_ui_render() gets a chance to build anything. Turning the
-    // backlight on this late means the user only ever sees the real, dark,
-    // populated dashboard - not a flash of the light default theme, nor a
-    // half-built screen while display_ui_render() is still working. Note
-    // display_ui_render() building all 16 Settings/dashboard screens up
-    // front is itself slow (multiple seconds) since the LVGL object pool
-    // moved to PSRAM (see sdkconfig.defaults' CONFIG_LV_MEM_SIZE_KILOBYTES
-    // comment) - this fix removes the white/light flash during that window,
-    // it does not shorten the window itself.
-    ESP_RETURN_ON_ERROR(board_jc4880p443c_backlight_on(), TAG, "turn on backlight");
+    // on_color_trans_done only says the source draw buffer can be recycled;
+    // ESP-IDF explicitly does not promise that the internal framebuffer has
+    // finished refreshing to the screen. With the 180-degree software
+    // rotation, the final logical 40px status-bar stripe maps to the panel's
+    // first native scan lines. If scanout has already passed those lines,
+    // enabling the backlight immediately can reveal their previous light
+    // contents until the next frame. Wait for more than two complete scans;
+    // the extra tick prevents tick-phase truncation from shortening 40 ms.
+    vTaskDelay(pdMS_TO_TICKS(DISPLAY_BOOT_SCANOUT_GUARD_MS) + 1U);
+
+    // Straight to the user's saved brightness (and night-mode window, if
+    // active) rather than board_jc4880p443c_backlight_on()'s fixed 100% -
+    // going to full duty first would show a visible brightness dip one
+    // update-timer tick later when display_apply_brightness() corrected it.
+    // s_display was loaded before the black-frame flush above; this touches
+    // only LEDC, no LVGL objects, so it's safe outside the lock.
+    display_apply_brightness();
+
+    // Keep the already-flushed black frame on-screen while the costly
+    // dashboard widgets are allocated from the PSRAM-backed LVGL pool. The
+    // port task cannot flush a partially-built tree while this lock is held;
+    // after unlock it draws the finished dark UI asynchronously.
+    if (!board_jc4880p443c_display_lock(0))
+    {
+        ESP_LOGE(TAG, "failed to acquire LVGL lock for dashboard build");
+        return ESP_FAIL;
+    }
+    display_ui_render();
+    board_jc4880p443c_display_unlock();
 
     ESP_LOGI(TAG, "Display UI started.");
     return ESP_OK;
@@ -6238,6 +6479,28 @@ static int cmd_nav(int argc, char **argv)
     return 0;
 }
 
+// On-demand equivalent of ui_log_lv_mem()'s automatic instrumentation (see
+// ui_mem_collect()'s comment) - printed directly rather than via ESP_LOGD so
+// it's visible over the console regardless of the runtime log level, in a
+// single greppable line matching this file's other dev commands' style
+// (NAV_OK, SCREENSHOT_BEGIN).
+static int cmd_memlog(int argc, char **argv)
+{
+    (void)argc;
+    (void)argv;
+    ui_mem_snapshot_t s;
+    ui_mem_collect(&s);
+    printf("MEMLOG lvgl_used_pct=%u lvgl_free=%u lvgl_biggest=%u lvgl_frag_pct=%u "
+           "internal_free=%u internal_largest=%u internal_min_free=%u "
+           "psram_free=%u psram_largest=%u psram_min_free=%u "
+           "settings_view=%d wifi_rows=%u resident_subscreens=%d\n",
+           (unsigned)s.lvgl.used_pct, (unsigned)s.lvgl.free_size, (unsigned)s.lvgl.free_biggest_size,
+           (unsigned)s.lvgl.frag_pct, (unsigned)s.internal_free, (unsigned)s.internal_largest,
+           (unsigned)s.internal_min_free, (unsigned)s.psram_free, (unsigned)s.psram_largest,
+           (unsigned)s.psram_min_free, s.settings_view, s.wifi_rows, s.resident_subscreens);
+    return 0;
+}
+
 esp_err_t display_ui_register_dev_nav_console(void)
 {
     const esp_console_cmd_t nav_cmd = {
@@ -6248,7 +6511,18 @@ esp_err_t display_ui_register_dev_nav_console(void)
         .hint = NULL,
         .func = &cmd_nav,
     };
-    return esp_console_cmd_register(&nav_cmd);
+    esp_err_t err = esp_console_cmd_register(&nav_cmd);
+    if (err != ESP_OK)
+    {
+        return err;
+    }
+    const esp_console_cmd_t memlog_cmd = {
+        .command = "memlog",
+        .help = "Print LVGL pool / internal-RAM / PSRAM headroom and UI state (dev builds only)",
+        .hint = NULL,
+        .func = &cmd_memlog,
+    };
+    return esp_console_cmd_register(&memlog_cmd);
 }
 
 #else // !CONFIG_DEV_SCREENSHOT_CONSOLE

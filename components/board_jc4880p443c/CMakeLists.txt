@@ -9,6 +9,7 @@ idf_component_register(
         esp_driver_i2c
         esp_driver_ledc
         esp_hw_support
+        esp_mm
         espressif__esp_lcd_st7701
         espressif__esp_lcd_touch_gt911
         espressif__esp_lvgl_port

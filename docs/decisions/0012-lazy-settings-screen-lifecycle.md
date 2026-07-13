@@ -245,3 +245,131 @@ say so) - no equivalent fix needed there.
   add) and leave the rest eager**: rejected for the same reason as the first
   alternative - narrower, and doesn't bound peak memory usage the way
   building/tearing down every sub-screen does.
+
+## Amended 2026-07-13: re-audit after a temporary revert, plus baseline profiling
+
+This decision, and the PSRAM pool move it built on (`82b1352`), were briefly
+reverted locally (branch `revert/post-exit-hit-area-fixes`, commits
+`46a6dc8`/`ced4699`/`527017c`) while re-investigating the original
+crash/WDT reports with fresh backtraces. That investigation reconfirmed the
+same root cause this ADR and `82b1352` already fixed (LVGL pool exhaustion
+during Wi-Fi-list construction), found nothing that changes decisions 1-5
+above, and the revert was undone: this ADR's lifecycle plus the PSRAM pool
+are both still in effect on `main`. Four things came out of that pass (and
+the user's hardware reports that followed it) worth recording here rather
+than in a separate ADR:
+
+**A latent bug in the lifecycle itself, fixed.** `schedule_watchlist_manage_rebuild()`
+(added by `82b1352` as hardening, kept through this ADR) defers the
+Watchlist Manage rebuild via `lv_async_call()` so a Remove/drag event
+doesn't tear down the row indev still points at - but `destroy_settings_view()`
+never cancelled that pending call. Remove/drag followed by an instant Back
+left the async call queued against an already-destroyed screen; it later
+fired, silently rebuilding (and re-showing behind whatever view was now
+active) a Watchlist Manage the user had already left - an orphaned
+sub-screen violating this ADR's core invariant (at most one lazily-built
+sub-screen resident). Fixed by cancelling the pending call in
+`destroy_settings_view()`'s `WATCHLIST_MANAGE` case, plus a
+belt-and-suspenders guard in the async callback itself that no-ops if that
+view isn't active. Verified via a temporary console hook reproducing the
+exact race: `watchlist_manage_screen` stayed `ALIVE` after Back on the
+unpatched build, `NULL` with the fix.
+
+**Two more of decision 4's ordering bugs, in the physical-tap paths.**
+User hardware testing found tapping "+ Add network" (or any unsaved AP row)
+hard-hung the device on every tap: both `wifi_add_network_click_cb()` and
+`wifi_ap_click_cb()` called `lv_textarea_set_text(s_wifi_password_input, "")`
+*before* `wifi_password_screen_set_ssid()` - the same
+touch-a-widget-before-building-it ordering this ADR's decision 4 documents
+fixing in `cmd_nav`'s `wifi_password` target. These two were missed because
+the verification sweep drove screens via the `nav` console (the fixed path),
+not physical taps; `LV_ASSERT_NULL` then trapped on the LVGL task while it
+held the display lock, killing touch and console together. Fixed by the
+same reorder. Lesson folded into the verification checklist: every
+entry-point *tap handler* into a lazy screen needs covering, not just the
+nav targets.
+
+**The white boot flash returned - the backlight-ordering fix had several
+holes.** User hardware testing reported a 1-2s white screen at every boot
+despite the backlight-after-render reorder, then - after a first round of
+fixes - a residual white flash exactly where the bottom status bar sits,
+appearing right before the bar renders. A framebuffer clear had been tried
+the previous day without success, which turned out to be the key clue: the
+buffer was clean, but the LVGL port task then flushed the *default
+light-themed screen* back into it - the light source itself was never
+removed. The bar-shaped residual matches the render geometry: the draw
+buffer is 40px-high stripes and the bar is exactly 40px, i.e. the final
+stripe of the first full-screen flush, the last region painted over.
+
+The complete fix works by making it impossible for the panel to ever be lit
+over anything but black:
+
+1. `backlight_pwm_init()`'s LEDC channel started at `.duty = 1023` -
+   backlight to 100% as a side effect of display bring-up (~1.5s after
+   power-on). This is what made the flash survive every reordering of the
+   *later* backlight calls. Now starts at duty 0.
+2. New `board_jc4880p443c_backlight_early_off()` (GPIO output low), first
+   statement of `app_main()` - the pin's power-on state isn't guaranteed
+   off and LEDC only takes the pin over ~1.5s in.
+3. The DPI framebuffer is cleared to black (memset + `esp_cache_msync`)
+   right after panel init.
+4. The LVGL default screen is styled black immediately after display
+   registration - any flush before the real UI exists now paints black
+   over black, never the light default theme (the piece the previous
+   day's buffer-clear attempt was missing).
+5. The `display_apply_brightness()` call at the top of
+   `display_ui_render()` (which predates the reorder and, left in place,
+   lit the panel at render start) - dropped.
+6. `lv_refr_now()` under the display lock right after
+   `display_ui_render()`: building the widget tree only marks areas
+   dirty - the actual draw+flush happens on esp_lvgl_port's task after
+   the lock is released, i.e. after any backlight call placed "after
+   render", and the first full-screen software render measures 1155ms.
+   The first dark frame is now synchronously rendered and flushed before
+   anything lights the panel, and the backlight comes on straight at the
+   user's saved brightness via `display_apply_brightness()` rather than
+   full-duty `backlight_on()` (also removing the 100%-then-dip artifact
+   one timer tick later).
+7. `lv_refr_now()` completes on the DPI driver's `on_color_trans_done`
+   callback, which only guarantees that the last 40px LVGL stripe has been
+   copied into the internal framebuffer - not that the panel has physically
+   scanned it out. With the 180-degree software rotation, that final logical
+   status-bar stripe maps to the first native scan lines and can remain from
+   the previous light frame until the next refresh. After releasing the LVGL
+   lock, startup now waits 40ms plus one FreeRTOS tick before applying
+   brightness. The verified 34MHz / 576x976 total timing is 16.53ms per
+   frame, so the guard covers more than two complete scans without changing
+   the working single-framebuffer/partial-buffer configuration.
+
+**Baseline hardware profiling, with one number worth flagging.** New
+on-demand (`memlog` console command) and optional periodic
+(`CONFIG_UI_DIAGNOSTICS`) instrumentation was added to measure LVGL
+pool / internal-RAM / PSRAM headroom directly, rather than relying on the
+one-off measurements above. Confirmed on-device:
+
+- `resident_subscreens` (a live count of the 13 lazy sub-screen root
+  pointers) never exceeded 1 across 150+ nav-stress cycles and a full sweep
+  of every Settings view, including re-entry - decision 1's invariant holds
+  in practice, not just by code inspection.
+- Idle/per-screen LVGL pool usage with a normal Wi-Fi environment (3 real
+  APs) and the Watchlist at its 10-symbol cap: 32-51% used, 60-85 KB free
+  of the 512 KB pool - consistent with this ADR's and `82b1352`'s
+  measurements.
+- **The documented worst case is tighter than the historical single
+  measurement suggested.** `82b1352`'s validation quoted a padded 26-row
+  Wi-Fi list building at "used=30%, free=357KB". Re-measured here with the
+  current code and a full `WIFI_DISPLAY_ROWS_MAX` (32) synthetic rows: the
+  pool reaches **~92% used, ~9-10 KB free, ~7-8 KB biggest free block** -
+  roughly an order of magnitude less headroom than the earlier number,
+  most likely reflecting cumulative pool pressure from other features added
+  since (Phase 15/16 screens, chart widgets, etc.) rather than a change in
+  Wi-Fi-row cost itself. This was stress-tested directly: 25 full cycles of
+  build-the-32-row-list -> navigate to Watchlist Manage -> back to Settings,
+  each cycle re-confirming the ~92%/9-10KB state, zero crashes/WDT/errors,
+  no downward drift across cycles (i.e. no leak) - so the current pool
+  still comfortably survives the worst case, but with materially less
+  margin than previously documented. This number should be the basis for
+  any future `ui_mem_can_build()`-style low-memory guard's threshold (not
+  the older 30%/357KB figure), and is a data point in favor of eventually
+  reducing Wi-Fi/Watchlist row object-weight if further features add
+  meaningfully to baseline pool usage.

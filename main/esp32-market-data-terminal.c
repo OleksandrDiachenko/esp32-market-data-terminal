@@ -1,6 +1,7 @@
 #include "startup_diagnostics.h"
 #include "app_lifecycle.h"
 #include "app_state.h"
+#include "board_jc4880p443c.h"
 #include "app_state_ota_task.h"
 #include "app_state_sync_task.h"
 #include "app_state_ws_task.h"
@@ -39,6 +40,17 @@ static void reseed_watchlist_after_schema_bump(void)
 
 void app_main(void)
 {
+    // First, before any logging or init: the backlight pin's power-on state
+    // isn't guaranteed off, and display bring-up (when LEDC takes the pin
+    // over, at duty 0) is ~1.5s away behind NVS/lifecycle init - an
+    // uninitialized panel glowing white for that window is the last
+    // remaining piece of the boot white-screen bug (see
+    // docs/decisions/0012, "Amended" section).
+    if (board_jc4880p443c_backlight_early_off() != ESP_OK)
+    {
+        ESP_LOGW(TAG, "Backlight early-off failed; a brief boot flash may be visible");
+    }
+
     ESP_LOGI(TAG, "ESP32 Market Data Terminal started");
 
     if (startup_diagnostics() != ESP_OK)

@@ -11,6 +11,7 @@ and runtime behavior on the real ESP32-P4 board.
 - [ESP32-P4 startup diagnostics](esp32-p4-startup-diagnostics.md)
 - [Application lifecycle](app-lifecycle-hardware-test.md)
 - [Display and touch bring-up](display-touch-bring-up.md)
+- [Staged black frame before dashboard boot](boot-status-bar-flash-hardware-test.md)
 - [ESP-Hosted Wi-Fi link bring-up](wifi-hosted-link-bring-up.md)
 - [Wi-Fi autoconnect](wifi-autoconnect-hardware-test.md)
 - [Market data client](market-data-client-hardware-test.md)

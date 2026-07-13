@@ -17,4 +17,33 @@ menu "Development tools"
             sdkconfig.defaults - it must stay off in production/release
             builds.
 
+    config UI_DIAGNOSTICS
+        bool "Enable periodic UI memory diagnostics logging (dev-only)"
+        default n
+        help
+            Logs LVGL pool (lv_mem_monitor), internal-RAM, and PSRAM
+            free/largest-block/low-watermark figures - each measured
+            separately, since MALLOC_CAP_INTERNAL and MALLOC_CAP_SPIRAM
+            describe disjoint regions and OR-ing them into one
+            heap_caps_get_free_size() call would silently mix the two -
+            plus the active Settings view, live Wi-Fi row count, and
+            resident Settings-sub-screen count (should never exceed 1).
+
+            Logged at ESP_LOGI every ~30 ticks of the 1s UI update timer,
+            on every Settings view transition, and after each Wi-Fi/
+            Watchlist list rebuild - ESP_LOGI rather than ESP_LOGD because
+            this project's default CONFIG_LOG_MAXIMUM_LEVEL (INFO) compiles
+            ESP_LOGD out entirely, which would make this option silently do
+            nothing without also raising the global log ceiling. These
+            automatic call sites are compiled out entirely when this option
+            is off, so periodic logging costs nothing in a normal build -
+            the underlying measurement is still reachable on demand via the
+            "memlog" console command (CONFIG_DEV_SCREENSHOT_CONSOLE),
+            independent of this option.
+
+            Enable this only via 'idf.py menuconfig' in your local
+            sdkconfig (sdkconfig is gitignored). Never set this to y in
+            sdkconfig.defaults - it must stay off in production/release
+            builds.
+
 endmenu

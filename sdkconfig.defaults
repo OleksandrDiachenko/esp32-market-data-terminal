@@ -139,6 +139,17 @@ CONFIG_LV_FONT_MONTSERRAT_28=y
 # that entirely.
 CONFIG_LV_MEM_SIZE_KILOBYTES=512
 
+# LVGL's own WARN-level logging - deliberately left on in production, not
+# gated behind a dev-only Kconfig option like CONFIG_UI_DIAGNOSTICS
+# (main/Kconfig.projbuild) is. It's cheap (WARN only, not INFO/TRACE) and is
+# the only way lv_malloc()/lv_realloc() allocation failures - the exact
+# LV_ASSERT_MALLOC failure mode from the pool-exhaustion bug above - become
+# visible on the serial console instead of silently free-running into a
+# while(1) trap.
+CONFIG_LV_USE_LOG=y
+CONFIG_LV_LOG_LEVEL_WARN=y
+CONFIG_LV_LOG_PRINTF=y
+
 # Needed for LV_EVENT_HIT_TEST (display_ui.c's asymmetric_hit_test_cb()):
 # without it, lv_hit_test_info_t is only forward-declared and its `point`/
 # `res` fields are unreachable from app code, even though the public
