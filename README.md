@@ -1,6 +1,6 @@
-# ESP32 Market Data Terminal
+# Market Data Ticker
 
-Embedded C / ESP-IDF firmware for an ESP32-P4 based market data terminal: a
+Embedded C / ESP-IDF firmware for Market Data Ticker: an ESP32-P4-based
 touchscreen device that shows a live cryptocurrency watchlist (price, change,
 sparkline) sourced from the public Binance REST and WebSocket APIs.
 

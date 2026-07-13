@@ -51,7 +51,7 @@ void app_main(void)
         ESP_LOGW(TAG, "Backlight early-off failed; a brief boot flash may be visible");
     }
 
-    ESP_LOGI(TAG, "ESP32 Market Data Terminal started");
+    ESP_LOGI(TAG, "Market Data Ticker started");
 
     if (startup_diagnostics() != ESP_OK)
     {
