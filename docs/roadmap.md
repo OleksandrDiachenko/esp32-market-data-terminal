@@ -567,6 +567,14 @@ Acceptance criteria:
       confirming correct rendering and correct re-entry
 - [x] `idf.py build` + host tests pass
 
+Follow-up (2026-07-13): re-audit of the original crash reports found and fixed
+a latent lifecycle bug (`schedule_watchlist_manage_rebuild()`'s deferred call
+surviving screen teardown - see decision 0012's "Amended" section), added
+on-demand/opt-in LVGL memory diagnostics (`memlog` console command,
+`CONFIG_UI_DIAGNOSTICS`), and re-measured the Wi-Fi-nav worst case at ~92%
+pool usage (tighter than the historical 30% figure, still safe) - see
+`docs/debugging/wifi-nav-pool-exhaustion.md`.
+
 ### Phase 17: Portfolio polish
 Status: Planned
 

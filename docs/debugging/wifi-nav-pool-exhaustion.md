@@ -143,3 +143,15 @@ skipping the Wi-Fi list rebuild while a finger is pressed on the list.
 - Consider whether the LVGL assert handler should be made non-fatal (log + skip a
   widget) rather than `while(1)`-trap, so a future overflow degrades instead of
   freezing.
+
+## Re-measured 2026-07-13 (see decision 0012's "Amended" section)
+
+Re-ran this validation with the current tree and a full `WIFI_DISPLAY_ROWS_MAX`
+(32, not 26) synthetic-row list: **used=92%, free=~9-10 KB, biggest free block
+~7-8 KB** - materially tighter than the 30%/357KB figure above, most likely from
+cumulative pool pressure added by later features rather than a change in
+per-row cost. Stress-tested 25 full cycles at this exact state (rebuild the
+32-row list, navigate away and back) with zero crashes/WDT and no drift. Still
+safe, but treat the 30%/357KB number above as historical, not current - use
+`memlog` (`CONFIG_DEV_SCREENSHOT_CONSOLE`) or `CONFIG_UI_DIAGNOSTICS` to
+re-measure before relying on either figure.

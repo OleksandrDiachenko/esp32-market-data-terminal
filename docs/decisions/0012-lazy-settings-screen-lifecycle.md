@@ -245,3 +245,64 @@ say so) - no equivalent fix needed there.
   add) and leave the rest eager**: rejected for the same reason as the first
   alternative - narrower, and doesn't bound peak memory usage the way
   building/tearing down every sub-screen does.
+
+## Amended 2026-07-13: re-audit after a temporary revert, plus baseline profiling
+
+This decision, and the PSRAM pool move it built on (`82b1352`), were briefly
+reverted locally (branch `revert/post-exit-hit-area-fixes`, commits
+`46a6dc8`/`ced4699`/`527017c`) while re-investigating the original
+crash/WDT reports with fresh backtraces. That investigation reconfirmed the
+same root cause this ADR and `82b1352` already fixed (LVGL pool exhaustion
+during Wi-Fi-list construction), found nothing that changes decisions 1-5
+above, and the revert was undone: this ADR's lifecycle plus the PSRAM pool
+are both still in effect on `main`. Two things came out of that pass worth
+recording here rather than in a separate ADR:
+
+**A latent bug in the lifecycle itself, fixed.** `schedule_watchlist_manage_rebuild()`
+(added by `82b1352` as hardening, kept through this ADR) defers the
+Watchlist Manage rebuild via `lv_async_call()` so a Remove/drag event
+doesn't tear down the row indev still points at - but `destroy_settings_view()`
+never cancelled that pending call. Remove/drag followed by an instant Back
+left the async call queued against an already-destroyed screen; it later
+fired, silently rebuilding (and re-showing behind whatever view was now
+active) a Watchlist Manage the user had already left - an orphaned
+sub-screen violating this ADR's core invariant (at most one lazily-built
+sub-screen resident). Fixed by cancelling the pending call in
+`destroy_settings_view()`'s `WATCHLIST_MANAGE` case, plus a
+belt-and-suspenders guard in the async callback itself that no-ops if that
+view isn't active. Verified via a temporary console hook reproducing the
+exact race: `watchlist_manage_screen` stayed `ALIVE` after Back on the
+unpatched build, `NULL` with the fix.
+
+**Baseline hardware profiling, with one number worth flagging.** New
+on-demand (`memlog` console command) and optional periodic
+(`CONFIG_UI_DIAGNOSTICS`) instrumentation was added to measure LVGL
+pool / internal-RAM / PSRAM headroom directly, rather than relying on the
+one-off measurements above. Confirmed on-device:
+
+- `resident_subscreens` (a live count of the 13 lazy sub-screen root
+  pointers) never exceeded 1 across 150+ nav-stress cycles and a full sweep
+  of every Settings view, including re-entry - decision 1's invariant holds
+  in practice, not just by code inspection.
+- Idle/per-screen LVGL pool usage with a normal Wi-Fi environment (3 real
+  APs) and the Watchlist at its 10-symbol cap: 32-51% used, 60-85 KB free
+  of the 512 KB pool - consistent with this ADR's and `82b1352`'s
+  measurements.
+- **The documented worst case is tighter than the historical single
+  measurement suggested.** `82b1352`'s validation quoted a padded 26-row
+  Wi-Fi list building at "used=30%, free=357KB". Re-measured here with the
+  current code and a full `WIFI_DISPLAY_ROWS_MAX` (32) synthetic rows: the
+  pool reaches **~92% used, ~9-10 KB free, ~7-8 KB biggest free block** -
+  roughly an order of magnitude less headroom than the earlier number,
+  most likely reflecting cumulative pool pressure from other features added
+  since (Phase 15/16 screens, chart widgets, etc.) rather than a change in
+  Wi-Fi-row cost itself. This was stress-tested directly: 25 full cycles of
+  build-the-32-row-list -> navigate to Watchlist Manage -> back to Settings,
+  each cycle re-confirming the ~92%/9-10KB state, zero crashes/WDT/errors,
+  no downward drift across cycles (i.e. no leak) - so the current pool
+  still comfortably survives the worst case, but with materially less
+  margin than previously documented. This number should be the basis for
+  any future `ui_mem_can_build()`-style low-memory guard's threshold (not
+  the older 30%/357KB figure), and is a data point in favor of eventually
+  reducing Wi-Fi/Watchlist row object-weight if further features add
+  meaningfully to baseline pool usage.
