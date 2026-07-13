@@ -152,6 +152,15 @@ extern "C"
 
     esp_err_t wifi_manager_get_snapshot(wifi_manager_snapshot_t *out_snapshot);
 
+    /**
+     * Returns the live RSSI of the currently associated access point.
+     *
+     * This reads the Wi-Fi driver's current station information and does not
+     * start a scan. Returns an error when Wi-Fi is not associated or the
+     * driver cannot provide the information.
+     */
+    esp_err_t wifi_manager_get_connected_rssi(int8_t *out_rssi);
+
     /** Queue of wifi_manager_event_t, owned by the manager. Do not delete it. */
     QueueHandle_t wifi_manager_get_event_queue(void);
 

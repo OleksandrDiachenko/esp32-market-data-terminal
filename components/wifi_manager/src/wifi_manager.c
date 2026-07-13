@@ -1272,4 +1272,20 @@ esp_err_t wifi_manager_get_snapshot(wifi_manager_snapshot_t *out_snapshot)
     return ESP_OK;
 }
 
+esp_err_t wifi_manager_get_connected_rssi(int8_t *out_rssi)
+{
+    if (out_rssi == NULL)
+    {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    wifi_ap_record_t ap_info;
+    esp_err_t ret = esp_wifi_sta_get_ap_info(&ap_info);
+    if (ret == ESP_OK)
+    {
+        *out_rssi = ap_info.rssi;
+    }
+    return ret;
+}
+
 QueueHandle_t wifi_manager_get_event_queue(void) { return event_queue; }

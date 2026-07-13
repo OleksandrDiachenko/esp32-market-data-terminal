@@ -1286,11 +1286,16 @@ static void update_statusbar(void)
     case WIFI_MANAGER_STATE_CONNECTED:
     {
         int8_t rssi;
-        // Edge case at 1b) in build_wifi_display_rows() below: the manager
-        // considers a profile connected but the last scan pass hasn't caught
-        // up yet - no rssi to size the icon by, so show full bars rather
-        // than none (an empty icon reads as "no signal", not "unknown").
-        uint8_t bars = statusbar_lookup_connected_rssi(&snapshot, &rssi) ? wifi_rssi_to_bars(rssi) : 4;
+        // Query the driver directly so this stays current outside the Wi-Fi
+        // screen, where the background scan that feeds the snapshot does not
+        // run. If that read is temporarily unavailable, retain the latest
+        // scan result; a just-connected AP with neither source still shows
+        // full bars for the existing "connected but not measured yet" state.
+        uint8_t bars = 4;
+        if (wifi_manager_get_connected_rssi(&rssi) == ESP_OK || statusbar_lookup_connected_rssi(&snapshot, &rssi))
+        {
+            bars = wifi_rssi_to_bars(rssi);
+        }
         // COLOR_MUTED, not COLOR_UP - matches the SETTINGS/EXIT label next to
         // it rather than reading as its own accent color.
         statusbar_set_signal_bars(bars, COLOR_MUTED);
