@@ -388,6 +388,35 @@ static void ui_mem_collect(ui_mem_snapshot_t *out)
                                 (s_about_screen != NULL);
 }
 
+// Thresholds derived from on-device measurement (see decision
+// 0012-lazy-settings-screen-lifecycle.md's "Amended" section): a full
+// WIFI_DISPLAY_ROWS_MAX (32) row Wi-Fi list - already the worst case this UI
+// can produce - safely completes at ~9-10KB free / ~7-8KB biggest free
+// block, stress-tested over 25 cycles with zero failures and no drift.
+// These floors sit below that observed-safe minimum, so normal operation -
+// including today's real worst case - never trips this guard; it exists as
+// defense-in-depth against a *worse* future scenario (more baseline screens
+// added later, a busier pool from other features) than what's been proven
+// safe, not to second-guess the current one. Not a guarantee against
+// allocation failure - the pool's state can still change between this check
+// and a row's last allocation - lazy lifecycle + bounded list sizes remain
+// the primary protection.
+#define UI_MEM_MIN_FREE_BYTES 4096
+#define UI_MEM_MIN_BIGGEST_BYTES 3072
+
+static bool ui_mem_can_build(const char *what)
+{
+    lv_mem_monitor_t mon;
+    lv_mem_monitor(&mon);
+    if (mon.free_size < UI_MEM_MIN_FREE_BYTES || mon.free_biggest_size < UI_MEM_MIN_BIGGEST_BYTES)
+    {
+        ESP_LOGW(TAG, "LVGL pool low, truncating %s (free=%u biggest=%u used_pct=%u%%)", what,
+                 (unsigned)mon.free_size, (unsigned)mon.free_biggest_size, (unsigned)mon.used_pct);
+        return false;
+    }
+    return true;
+}
+
 #if CONFIG_UI_DIAGNOSTICS
 // Automatic instrumentation call sites (update_timer_cb, show_settings_view,
 // Wi-Fi/Watchlist rebuilds) are gated on this option and log at ESP_LOGI, not
@@ -1612,6 +1641,19 @@ static void make_plain_container(lv_obj_t *obj)
                                 LV_OBJ_FLAG_SCROLL_ELASTIC | LV_OBJ_FLAG_SCROLL_MOMENTUM | LV_OBJ_FLAG_SCROLL_CHAIN |
                                 LV_OBJ_FLAG_SCROLL_WITH_ARROW | LV_OBJ_FLAG_SNAPPABLE | LV_OBJ_FLAG_PRESS_LOCK |
                                 LV_OBJ_FLAG_GESTURE_BUBBLE);
+}
+
+// Appended by the Wi-Fi/Watchlist/time-zone-city list builders when
+// ui_mem_can_build() calls a halt partway through - a single label, cheap
+// enough to add even when the pool just failed that check for the next real
+// row's worth of widgets.
+static void build_truncated_row(lv_obj_t *parent)
+{
+    lv_obj_t *label = lv_label_create(parent);
+    lv_obj_set_style_text_color(label, COLOR_MUTED, 0);
+    lv_obj_set_style_pad_top(label, 8, 0);
+    lv_obj_set_style_pad_left(label, 18, 0);
+    lv_label_set_text(label, "...");
 }
 
 // lv_textarea/lv_keyboard both render with LVGL's built-in default theme
@@ -2952,6 +2994,11 @@ static void update_wifi_screen(void)
     }
     for (uint8_t i = 0; i < new_count; i++)
     {
+        if (!ui_mem_can_build("wifi row"))
+        {
+            build_truncated_row(s_wifi_list);
+            break;
+        }
         build_wifi_ap_row(&new_rows[i], i);
     }
     build_wifi_add_network_row(s_wifi_list);
@@ -3540,6 +3587,11 @@ static void watchlist_manage_rebuild(void)
     lv_obj_clean(s_watchlist_list);
     for (uint8_t i = 0; i < count; i++)
     {
+        if (!ui_mem_can_build("watchlist row"))
+        {
+            build_truncated_row(s_watchlist_list);
+            break;
+        }
         app_state_symbol_meta_t meta;
         if (app_state_get_symbol_meta(i, &meta) != ESP_OK)
         {
@@ -5492,6 +5544,11 @@ static void show_time_zone_cities(tz_zone_id_t zone)
         if (entry->zone != zone)
         {
             continue;
+        }
+        if (!ui_mem_can_build("time zone city row"))
+        {
+            build_truncated_row(s_time_zone_city_list);
+            break;
         }
         char title_buf[48];
         snprintf(title_buf, sizeof(title_buf), "%s/%s", s_tz_zone_names[entry->zone], s_tz_city_names[entry->city]);
