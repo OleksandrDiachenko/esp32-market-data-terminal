@@ -4,6 +4,7 @@
 #include "app_state_sync_task.h"
 #include "board_jc4880p443c.h"
 #include "display_format.h"
+#include "display_ui_logic.h"
 #include "esp_app_desc.h"
 #include "esp_check.h"
 #include "esp_log.h"
@@ -26,7 +27,6 @@
 // CONFIG_UI_DIAGNOSTICS - the dev console's "memlog" command uses it too.
 #include "esp_heap_caps.h"
 
-#include <ctype.h>
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -472,37 +472,6 @@ static lv_obj_t *s_disclaimer_screen;
 static market_data_kline_t s_klines_scratch[APP_STATE_KLINE_CAPACITY];
 static int32_t s_chart_scratch[APP_STATE_MAX_SYMBOLS][APP_STATE_KLINE_CAPACITY];
 
-// Buckets the time since event_ms (an app_state_ota_info_t.last_check_ms
-// value) into a coarse "X ago" label - event_ms == 0 means never. No
-// existing relative-time formatter in this file to reuse (update_statusbar()
-// only ever formats wall-clock time via strftime).
-static void format_relative_time(int64_t event_ms, char *out, size_t out_len)
-{
-    if (event_ms == 0)
-    {
-        snprintf(out, out_len, "Never");
-        return;
-    }
-
-    int64_t delta_s = (esp_timer_get_time() / 1000 - event_ms) / 1000;
-    if (delta_s < 60)
-    {
-        snprintf(out, out_len, "Just now");
-    }
-    else if (delta_s < 3600)
-    {
-        snprintf(out, out_len, "%d min ago", (int)(delta_s / 60));
-    }
-    else if (delta_s < 86400)
-    {
-        snprintf(out, out_len, "%d h ago", (int)(delta_s / 3600));
-    }
-    else
-    {
-        snprintf(out, out_len, "%d d ago", (int)(delta_s / 86400));
-    }
-}
-
 static const char *ota_err_message(ota_client_err_t err)
 {
     switch (err)
@@ -656,6 +625,7 @@ static void build_row(uint8_t index)
     // range in update_row() via display_format_normalize_value(), so the
     // axis itself never needs to change per tick.
     lv_chart_set_axis_range(row->chart, LV_CHART_AXIS_PRIMARY_Y, 0, CHART_SCALE_MAX);
+    lv_obj_add_flag(row->chart, LV_OBJ_FLAG_SEND_DRAW_TASK_EVENTS);
     lv_obj_add_event_cb(row->chart, chart_draw_event_cb, LV_EVENT_DRAW_TASK_ADDED, row);
 
     // Right: price + change, right-aligned.
@@ -1223,7 +1193,6 @@ static void tz_describe(const char *tz_label, const char *posix, char *out,
                         size_t out_len); // with the Time screens, below
 static bool wifi_ap_is_live_connected(const wifi_manager_snapshot_t *snap,
                                       const char *ssid); // with the Wi-Fi screens, below
-static uint8_t wifi_rssi_to_bars(int8_t rssi);           // with the Wi-Fi screens, below
 
 // Looks up the RSSI of the currently-connected network from the latest scan
 // pass, for the status bar's signal icon. Same staleness caveat as
@@ -1294,7 +1263,7 @@ static void update_statusbar(void)
         uint8_t bars = 4;
         if (wifi_manager_get_connected_rssi(&rssi) == ESP_OK || statusbar_lookup_connected_rssi(&snapshot, &rssi))
         {
-            bars = wifi_rssi_to_bars(rssi);
+            bars = display_ui_logic_rssi_to_bars(rssi);
         }
         // COLOR_MUTED, not COLOR_UP - matches the SETTINGS/EXIT label next to
         // it rather than reading as its own accent color.
@@ -1385,8 +1354,7 @@ static void display_apply_brightness(void)
         int start = s_display.night_start_hour * 60 + s_display.night_start_minute;
         int end = s_display.night_end_hour * 60 + s_display.night_end_minute;
 
-        bool in_window = (start <= end) ? (cur >= start && cur < end) : (cur >= start || cur < end);
-        if (in_window)
+        if (display_ui_logic_minute_in_window((uint16_t)cur, (uint16_t)start, (uint16_t)end))
         {
             target = DISPLAY_NIGHT_BRIGHTNESS_PERCENT;
         }
@@ -2534,25 +2502,6 @@ static void wifi_add_network_click_cb(lv_event_t *e)
     wifi_password_screen_focus_default_field(s_wifi_ssid_input); // SSID is empty here - fill it in first
 }
 
-// RSSI (dBm, typically -30..-90; higher/less negative is stronger) mapped to
-// a 4-bar signal icon using common OS-convention thresholds.
-static uint8_t wifi_rssi_to_bars(int8_t rssi)
-{
-    if (rssi >= -55)
-    {
-        return 4;
-    }
-    if (rssi >= -67)
-    {
-        return 3;
-    }
-    if (rssi >= -78)
-    {
-        return 2;
-    }
-    return 1;
-}
-
 // Four bars of increasing height, bottom-aligned. Lit bars are COLOR_ACCENT
 // when this is the active connection (mockup shows an accent signal icon on
 // the connected row) or COLOR_TEXT otherwise; unlit bars are COLOR_HAIRLINE.
@@ -2717,7 +2666,7 @@ static void build_wifi_ap_row(const wifi_display_row_t *disp_row, uint8_t index)
     ctx->connected = disp_row->connected;
     lv_obj_add_event_cb(row, wifi_ap_click_cb, LV_EVENT_CLICKED, ctx);
 
-    build_signal_icon(row, disp_row->has_rssi ? wifi_rssi_to_bars(disp_row->rssi) : 0, disp_row->connected);
+    build_signal_icon(row, disp_row->has_rssi ? display_ui_logic_rssi_to_bars(disp_row->rssi) : 0, disp_row->connected);
 
     lv_obj_t *info = lv_obj_create(row);
     lv_obj_remove_style_all(info);
@@ -3855,20 +3804,6 @@ static void watchlist_add_screen_reset(void)
 // punctuation, or lowercase entered on the full keyboard above still
 // produce a well-formed Binance pair (e.g. "ltc usdt!" -> "LTCUSDT").
 // Returns the sanitized length.
-static size_t watchlist_sanitize_symbol(const char *raw, char *out, size_t out_cap)
-{
-    size_t n = 0;
-    for (const char *p = raw; *p != '\0' && n + 1 < out_cap; p++)
-    {
-        if (isalnum((unsigned char)*p))
-        {
-            out[n++] = (char)toupper((unsigned char)*p);
-        }
-    }
-    out[n] = '\0';
-    return n;
-}
-
 // Fires from the keyboard's "Search" key. Blocking, like every other
 // market_data_client call - this runs synchronously on the LVGL task for
 // the ~0.5-2s HTTPS round trip (see docs/decisions on this screen's scope:
@@ -3881,7 +3816,7 @@ static void watchlist_add_check_cb(lv_event_t *e)
 {
     (void)e;
     char symbol[SETTINGS_SYMBOL_MAX_LEN + 1];
-    if (watchlist_sanitize_symbol(lv_textarea_get_text(s_watchlist_symbol_input), symbol, sizeof(symbol)) == 0)
+    if (display_ui_logic_sanitize_symbol(lv_textarea_get_text(s_watchlist_symbol_input), symbol, sizeof(symbol)) == 0)
     {
         return;
     }
@@ -4221,7 +4156,8 @@ static void updates_screen_reset(void)
     lv_label_set_text(s_updates_latest_version_label, info.latest_version[0] != '\0' ? info.latest_version : "--");
 
     char relative_buf[24];
-    format_relative_time(info.last_check_ms, relative_buf, sizeof(relative_buf));
+    display_ui_logic_format_relative_time(info.last_check_ms, esp_timer_get_time() / 1000, relative_buf,
+                                          sizeof(relative_buf));
     lv_label_set_text_fmt(s_updates_last_checked_label, "Last checked: %s", relative_buf);
 
     if (info.latest_version[0] == '\0')
@@ -5193,7 +5129,9 @@ typedef struct
     tz_posix_id_t posix;
 } tz_entry_t;
 
+// clang-format off
 #define TZROW(zone, city, posix) {zone, city, posix}
+// clang-format on
 
 // Not const: sorted in place, once, the first time build_time_zone_screen()
 // runs (see its qsort() call) so region/city lists read alphabetically
@@ -5481,9 +5419,10 @@ static void build_time_format_screen(lv_obj_t *screen)
     lv_obj_t *body =
         build_time_subscreen(screen, &s_time_format_screen, "Time format", NULL, NULL, time_format_back_cb);
 
-    build_time_toggle_row(body, "12-hour", time_format_row_click_cb, (void *)(uintptr_t)false,
+    build_time_toggle_row(body, "12-hour", time_format_row_click_cb, (void *)(uintptr_t) false,
                           &s_time_format_check_12h);
-    build_time_toggle_row(body, "24-hour", time_format_row_click_cb, (void *)(uintptr_t)true, &s_time_format_check_24h);
+    build_time_toggle_row(body, "24-hour", time_format_row_click_cb, (void *)(uintptr_t) true,
+                          &s_time_format_check_24h);
 
     time_format_refresh_marks();
 }

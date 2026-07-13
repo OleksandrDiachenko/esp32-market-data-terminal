@@ -56,6 +56,18 @@ static void test_count_out_of_range_rejected(void)
     CHECK(settings_symbols_validate(&cfg) == SETTINGS_CODEC_BAD_RANGE);
 }
 
+static void test_empty_watchlist_is_valid(void)
+{
+    symbol_settings_t cfg;
+    settings_symbols_init_default(&cfg);
+
+    CHECK(cfg.count == 0);
+    settings_symbols_seal(&cfg);
+
+    CHECK(settings_symbols_validate(&cfg) == SETTINGS_CODEC_OK);
+    CHECK(cfg.count == 0);
+}
+
 int main(void)
 {
     test_roundtrip();
@@ -63,5 +75,6 @@ int main(void)
     test_bad_magic_rejected();
     test_bad_version_rejected();
     test_count_out_of_range_rejected();
+    test_empty_watchlist_is_valid();
     return test_summary("settings_codec_symbols");
 }

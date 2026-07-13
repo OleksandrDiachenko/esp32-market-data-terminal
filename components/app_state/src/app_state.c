@@ -60,6 +60,8 @@ esp_err_t app_state_init(void)
     s_watchlist_event_queue = xQueueCreate(APP_STATE_WATCHLIST_EVENT_QUEUE_LEN, sizeof(app_state_watchlist_event_t));
     if (s_watchlist_event_queue == NULL)
     {
+        vSemaphoreDelete(s_lock);
+        s_lock = NULL;
         return ESP_ERR_NO_MEM;
     }
 
@@ -85,6 +87,16 @@ esp_err_t app_state_init(void)
         {
             ESP_LOGE(TAG, "PSRAM allocation failed for '%s' (%u bytes)", slot->symbol,
                      (unsigned)(sizeof(market_data_kline_t) * APP_STATE_KLINE_CAPACITY));
+            for (uint8_t j = 0; j < i; j++)
+            {
+                heap_caps_free(s_symbols[j].klines);
+                s_symbols[j].klines = NULL;
+            }
+            s_symbol_count = 0;
+            vQueueDelete(s_watchlist_event_queue);
+            s_watchlist_event_queue = NULL;
+            vSemaphoreDelete(s_lock);
+            s_lock = NULL;
             return ESP_ERR_NO_MEM;
         }
     }

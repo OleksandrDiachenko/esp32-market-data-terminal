@@ -132,6 +132,10 @@ esp_err_t market_data_ws_client_create(const char *const *symbols, uint8_t symbo
     {
         return ESP_ERR_INVALID_ARG;
     }
+    if (s_client != NULL || s_update_queue != NULL)
+    {
+        return ESP_ERR_INVALID_STATE;
+    }
 
     s_update_queue = xQueueCreate(MARKET_DATA_WS_UPDATE_QUEUE_LEN, sizeof(market_data_kline_update_t));
     if (s_update_queue == NULL)
@@ -143,6 +147,8 @@ esp_err_t market_data_ws_client_create(const char *const *symbols, uint8_t symbo
     if (market_data_ws_url_build_combined_stream(select_base_ws_url(), symbols, symbol_count, WS_STREAM_SUFFIX, url,
                                                  sizeof(url)) != MARKET_DATA_OK)
     {
+        vQueueDelete(s_update_queue);
+        s_update_queue = NULL;
         return ESP_ERR_INVALID_ARG;
     }
 
@@ -156,6 +162,8 @@ esp_err_t market_data_ws_client_create(const char *const *symbols, uint8_t symbo
     s_client = esp_websocket_client_init(&config);
     if (s_client == NULL)
     {
+        vQueueDelete(s_update_queue);
+        s_update_queue = NULL;
         return ESP_ERR_NO_MEM;
     }
 
@@ -164,6 +172,8 @@ esp_err_t market_data_ws_client_create(const char *const *symbols, uint8_t symbo
     {
         esp_websocket_client_destroy(s_client);
         s_client = NULL;
+        vQueueDelete(s_update_queue);
+        s_update_queue = NULL;
         return err;
     }
 
@@ -186,18 +196,22 @@ esp_err_t market_data_ws_client_start(const char *const *symbols, uint8_t symbol
     {
         return err;
     }
-    return market_data_ws_client_connect();
+    err = market_data_ws_client_connect();
+    if (err != ESP_OK)
+    {
+        market_data_ws_client_stop();
+    }
+    return err;
 }
 
 void market_data_ws_client_stop(void)
 {
-    if (s_client == NULL)
+    if (s_client != NULL)
     {
-        return;
+        esp_websocket_client_stop(s_client);
+        esp_websocket_client_destroy(s_client);
+        s_client = NULL;
     }
-    esp_websocket_client_stop(s_client);
-    esp_websocket_client_destroy(s_client);
-    s_client = NULL;
 
     if (s_update_queue != NULL)
     {

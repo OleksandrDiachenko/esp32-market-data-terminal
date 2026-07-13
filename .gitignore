@@ -19,6 +19,8 @@ managed_components/
 
 # Compiled host-test binaries (built by `make -C components/*/host_test test`)
 components/*/host_test/build/
+/main/host_test/build/
 
 # Agent files
 /AGENTS.md
+/.claude/

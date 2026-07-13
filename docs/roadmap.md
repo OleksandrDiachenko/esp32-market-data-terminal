@@ -575,6 +575,28 @@ on-demand/opt-in LVGL memory diagnostics (`memlog` console command,
 pool usage (tighter than the historical 30% figure, still safe) - see
 `docs/debugging/wifi-nav-pool-exhaustion.md`.
 
+### Phase 16.5: Pre-portfolio codebase audit and cleanup
+Status: In progress
+
+The audit baseline, severity matrix and evidence are tracked in
+`docs/reviews/pre-phase-17-code-audit.md` (GitHub issue #81). The code slice
+removes the temporary watchlist reseed, preserves a valid empty-watchlist
+runtime, enables sparkline draw-task events, extracts host-testable UI logic,
+strengthens CI gates and reconciles maintainer documentation. Physical
+release-regression and soak evidence remains an explicit gate rather than an
+unchecked claim.
+
+Acceptance criteria:
+- [x] Baseline, repository hygiene and first-party static review recorded
+- [x] Legacy boot-time watchlist reseed removed; empty persisted state host-tested
+- [x] Sparkline chart sends draw-task events
+- [x] Initial pure logic extracted from `display_ui.c` and host-tested
+- [x] Repo-wide formatting and first-party cppcheck made blocking CI gates
+- [x] Current setup, architecture, testing and screenshot documentation reconciled
+- [x] Clean release and development builds pass on the audit commit
+- [ ] Empty-watchlist reboot/add-back and sparkline behavior verified on hardware
+- [ ] Full regression, navigation stress and 60-minute soak report passes
+
 ### Phase 17: Portfolio polish
 Status: Planned
 
