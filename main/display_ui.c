@@ -713,6 +713,14 @@ static lv_obj_t *s_wifi_menu_backdrop;
 static lv_obj_t *s_wifi_menu_card;
 static lv_obj_t *s_wifi_menu_ssid_label;
 static void destroy_date_format_view(void); // defined near s_date_format_checks[]'s declaration
+// destroy_settings_view() must cancel any watchlist rebuild queued via
+// schedule_watchlist_manage_rebuild() before tearing the screen down -
+// otherwise a Remove/drag followed by an instant Back leaves the async call
+// pending, and it later fires against a torn-down screen and silently
+// rebuilds (and re-shows behind the new view) a Watchlist Manage the user
+// already left. See watchlist_manage_rebuild_async()'s own guard for the
+// other half of this fix.
+static void watchlist_manage_rebuild_async(void *unused);
 
 // Builds the sub-screen for `view` if it doesn't exist yet (idempotent - a
 // no-op if already built). Called both by show_settings_view() and by every
@@ -907,6 +915,10 @@ static void destroy_settings_view(settings_view_t view)
         }
         break;
     case SETTINGS_VIEW_WATCHLIST_MANAGE:
+        // Cancelled unconditionally, even if the screen was never built (or
+        // this is somehow reached with a NULL root) - a queued rebuild must
+        // never survive this view being torn down.
+        lv_async_call_cancel(watchlist_manage_rebuild_async, NULL);
         if (s_watchlist_manage_screen)
         {
             lv_obj_delete(s_watchlist_manage_screen);
@@ -1278,6 +1290,9 @@ static void watchlist_manage_rebuild(void);
 // is defensive hardening for a latent LVGL footgun - not the cause of the
 // crash/freeze bugs this file was audited for (that was LVGL-pool exhaustion,
 // fixed by moving the pool to PSRAM - see docs/debugging/wifi-nav-pool-exhaustion.md).
+// The deferral itself introduced a second footgun, fixed alongside this one:
+// see destroy_settings_view()'s SETTINGS_VIEW_WATCHLIST_MANAGE case and
+// watchlist_manage_rebuild_async()'s own guard below.
 static void schedule_watchlist_manage_rebuild(void);
 static void watchlist_add_screen_reset(void);
 
@@ -3438,6 +3453,16 @@ static void watchlist_manage_rebuild(void)
 static void watchlist_manage_rebuild_async(void *unused)
 {
     (void)unused;
+    // Belt-and-suspenders alongside destroy_settings_view()'s
+    // lv_async_call_cancel(): if this ever fires after the view has already
+    // been left (e.g. a cancel that raced a call already in LVGL's async
+    // queue), ensure_settings_view_built() inside watchlist_manage_rebuild()
+    // would otherwise silently rebuild - and re-show behind whatever's now
+    // active - a Watchlist Manage screen the user isn't on anymore.
+    if (s_settings_view != SETTINGS_VIEW_WATCHLIST_MANAGE)
+    {
+        return;
+    }
     watchlist_manage_rebuild();
 }
 
