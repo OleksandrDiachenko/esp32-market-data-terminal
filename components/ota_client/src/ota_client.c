@@ -47,7 +47,7 @@ ota_client_err_t ota_client_check_latest_release(ota_client_release_info_t *out_
 
     char url[128];
     snprintf(url, sizeof(url), "https://api.github.com/repos/%s/%s/releases/latest", OTA_CLIENT_GITHUB_OWNER,
-              OTA_CLIENT_GITHUB_REPO);
+             OTA_CLIENT_GITHUB_REPO);
 
     esp_http_client_config_t config = {
         .url = url,
@@ -136,7 +136,7 @@ ota_client_err_t ota_client_update_to(const char *tag, ota_client_progress_cb_t 
     // URL, which is what OTA_CLIENT_HTTP_BUFFER_SIZE is sized for.
     char url[192];
     int written = snprintf(url, sizeof(url), "https://github.com/%s/%s/releases/download/%s/%s",
-                            OTA_CLIENT_GITHUB_OWNER, OTA_CLIENT_GITHUB_REPO, tag, OTA_CLIENT_ASSET_NAME);
+                           OTA_CLIENT_GITHUB_OWNER, OTA_CLIENT_GITHUB_REPO, tag, OTA_CLIENT_ASSET_NAME);
     if (written < 0 || (size_t)written >= sizeof(url))
     {
         return OTA_CLIENT_ERR_INVALID_ARG;

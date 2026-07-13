@@ -21,13 +21,14 @@
 #include "esp_err.h"
 
 #ifdef __cplusplus
-extern "C" {
+extern "C"
+{
 #endif
 
-// Call once, after app_state_init() has loaded the watchlist and
-// wifi_manager_init()/_start() have been called (the task itself waits for
-// an actual Wi-Fi connection before doing anything network-related).
-esp_err_t app_state_ws_task_start(void);
+    // Call once, after app_state_init() has loaded the watchlist and
+    // wifi_manager_init()/_start() have been called (the task itself waits for
+    // an actual Wi-Fi connection before doing anything network-related).
+    esp_err_t app_state_ws_task_start(void);
 
 #ifdef __cplusplus
 }

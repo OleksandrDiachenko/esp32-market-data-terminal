@@ -47,8 +47,8 @@ static bool partition_is_empty(const esp_partition_t *partition)
     return true;
 }
 
-static esp_err_t parse_embedded_image(const esp_partition_t *partition, size_t *out_size,
-                                       char *out_version, size_t out_version_len)
+static esp_err_t parse_embedded_image(const esp_partition_t *partition, size_t *out_size, char *out_version,
+                                      size_t out_version_len)
 {
     esp_image_header_t header;
     if (esp_partition_read(partition, 0, &header, sizeof(header)) != ESP_OK)
@@ -57,8 +57,7 @@ static esp_err_t parse_embedded_image(const esp_partition_t *partition, size_t *
     }
     if (header.magic != ESP_IMAGE_HEADER_MAGIC)
     {
-        ESP_LOGE(TAG, "'%s' does not contain a valid app image (magic 0x%02x)", partition->label,
-                 header.magic);
+        ESP_LOGE(TAG, "'%s' does not contain a valid app image (magic 0x%02x)", partition->label, header.magic);
         return ESP_ERR_INVALID_ARG;
     }
 
@@ -126,8 +125,8 @@ static bool coprocessor_version_matches(const char *embedded_version)
     }
 
     char running_str[32];
-    snprintf(running_str, sizeof(running_str), "%" PRIu32 ".%" PRIu32 ".%" PRIu32, running.major1,
-             running.minor1, running.patch1);
+    snprintf(running_str, sizeof(running_str), "%" PRIu32 ".%" PRIu32 ".%" PRIu32, running.major1, running.minor1,
+             running.patch1);
 
     ESP_LOGI(TAG, "Co-processor firmware: running=%s embedded=%s", running_str, embedded_version);
     return strcmp(running_str, embedded_version) == 0;
@@ -158,8 +157,7 @@ static esp_err_t push_image_to_slave(const esp_partition_t *partition, size_t im
         ret = esp_hosted_slave_ota_write(chunk, to_read);
         if (ret != ESP_OK)
         {
-            ESP_LOGE(TAG, "esp_hosted_slave_ota_write failed at offset %u: %s", (unsigned)offset,
-                     esp_err_to_name(ret));
+            ESP_LOGE(TAG, "esp_hosted_slave_ota_write failed at offset %u: %s", (unsigned)offset, esp_err_to_name(ret));
             esp_hosted_slave_ota_end();
             return ret;
         }
@@ -188,8 +186,7 @@ esp_err_t wifi_manager_slave_ota_check_and_update(void)
     }
     if (partition_is_empty(partition))
     {
-        ESP_LOGI(TAG, "'%s' partition is empty - skipping co-processor firmware check",
-                 SLAVE_FW_PARTITION_LABEL);
+        ESP_LOGI(TAG, "'%s' partition is empty - skipping co-processor firmware check", SLAVE_FW_PARTITION_LABEL);
         return ESP_OK;
     }
 
@@ -207,8 +204,7 @@ esp_err_t wifi_manager_slave_ota_check_and_update(void)
         return ESP_OK;
     }
 
-    ESP_LOGW(TAG, "Co-processor firmware differs from embedded %s - pushing update over SDIO",
-             embedded_version);
+    ESP_LOGW(TAG, "Co-processor firmware differs from embedded %s - pushing update over SDIO", embedded_version);
     if (push_image_to_slave(partition, image_size) != ESP_OK)
     {
         ESP_LOGE(TAG, "Co-processor firmware update failed - continuing with the currently running version");
@@ -218,8 +214,9 @@ esp_err_t wifi_manager_slave_ota_check_and_update(void)
     esp_err_t ret = esp_hosted_slave_ota_activate();
     if (ret != ESP_OK)
     {
-        ESP_LOGE(TAG, "esp_hosted_slave_ota_activate failed: %s - co-processor still holds the new image "
-                      "but hasn't switched to it",
+        ESP_LOGE(TAG,
+                 "esp_hosted_slave_ota_activate failed: %s - co-processor still holds the new image "
+                 "but hasn't switched to it",
                  esp_err_to_name(ret));
         return ESP_OK;
     }

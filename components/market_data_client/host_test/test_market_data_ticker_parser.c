@@ -34,9 +34,8 @@ static void test_full_ticker(void)
 
 static void test_field_order_independent(void)
 {
-    const char *json =
-        "{\"lowPrice\":\"90.85000000\",\"highPrice\":\"95.40000000\",\"symbol\":\"LTCUSDT\","
-        "\"priceChangePercent\":\"-1.852\",\"lastPrice\":\"94.12000000\"}";
+    const char *json = "{\"lowPrice\":\"90.85000000\",\"highPrice\":\"95.40000000\",\"symbol\":\"LTCUSDT\","
+                       "\"priceChangePercent\":\"-1.852\",\"lastPrice\":\"94.12000000\"}";
     market_data_ticker_24hr_t ticker;
     CHECK(parse_all(json, &ticker) == MARKET_DATA_OK);
     CHECK(ticker.last_price == 94.12);
@@ -47,9 +46,8 @@ static void test_field_order_independent(void)
 
 static void test_missing_field_rejected(void)
 {
-    const char *json =
-        "{\"symbol\":\"LTCUSDT\",\"lastPrice\":\"94.12000000\",\"highPrice\":\"95.40000000\","
-        "\"lowPrice\":\"90.85000000\"}";
+    const char *json = "{\"symbol\":\"LTCUSDT\",\"lastPrice\":\"94.12000000\",\"highPrice\":\"95.40000000\","
+                       "\"lowPrice\":\"90.85000000\"}";
     market_data_ticker_24hr_t ticker;
     CHECK(parse_all(json, &ticker) == MARKET_DATA_ERR_PARSE);
 }

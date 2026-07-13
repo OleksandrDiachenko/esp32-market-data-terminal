@@ -15,12 +15,13 @@
 #include "esp_err.h"
 
 #ifdef __cplusplus
-extern "C" {
+extern "C"
+{
 #endif
 
-// Creates the background OTA task. Call once, after app_state_init().
-// Runs an initial check shortly after creation, then every 6h.
-esp_err_t app_state_ota_task_start(void);
+    // Creates the background OTA task. Call once, after app_state_init().
+    // Runs an initial check shortly after creation, then every 6h.
+    esp_err_t app_state_ota_task_start(void);
 
 #ifdef __cplusplus
 }

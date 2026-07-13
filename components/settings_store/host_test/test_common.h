@@ -10,15 +10,15 @@
 static int test_failures = 0;
 static int test_count = 0;
 
-#define CHECK(cond)                                                                    \
-    do                                                                                 \
-    {                                                                                  \
-        test_count++;                                                                  \
-        if (!(cond))                                                                   \
-        {                                                                              \
-            test_failures++;                                                          \
-            fprintf(stderr, "FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond);            \
-        }                                                                              \
+#define CHECK(cond)                                                                                                    \
+    do                                                                                                                 \
+    {                                                                                                                  \
+        test_count++;                                                                                                  \
+        if (!(cond))                                                                                                   \
+        {                                                                                                              \
+            test_failures++;                                                                                           \
+            fprintf(stderr, "FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond);                                            \
+        }                                                                                                              \
     } while (0)
 
 #define CHECK_STREQ(a, b) CHECK(strcmp((a), (b)) == 0)

@@ -17,8 +17,7 @@ static bool dbl_eq(double a, double b)
     return diff < 1e-6;
 }
 
-static market_data_err_t parse_one_chunk(const char *json, market_data_kline_t *out, uint16_t cap,
-                                          uint16_t *out_count)
+static market_data_err_t parse_one_chunk(const char *json, market_data_kline_t *out, uint16_t cap, uint16_t *out_count)
 {
     market_data_klines_parser_t p;
     market_data_klines_parser_init(&p, out, cap);
@@ -31,7 +30,7 @@ static market_data_err_t parse_one_chunk(const char *json, market_data_kline_t *
 }
 
 static market_data_err_t parse_byte_by_byte(const char *json, market_data_kline_t *out, uint16_t cap,
-                                             uint16_t *out_count)
+                                            uint16_t *out_count)
 {
     market_data_klines_parser_t p;
     market_data_klines_parser_init(&p, out, cap);
@@ -49,7 +48,7 @@ static market_data_err_t parse_byte_by_byte(const char *json, market_data_kline_
 
 // Deterministic pseudo-random chunk splitter (no external RNG dependency).
 static market_data_err_t parse_random_chunks(const char *json, market_data_kline_t *out, uint16_t cap,
-                                              uint16_t *out_count, unsigned seed)
+                                             uint16_t *out_count, unsigned seed)
 {
     market_data_klines_parser_t p;
     market_data_klines_parser_init(&p, out, cap);
@@ -129,7 +128,7 @@ static void test_malformed_json_rejected(void)
 static void test_row_too_few_fields_rejected(void)
 {
     const char *json = "[[1499040000000,\"0.1\",\"0.2\",\"0.1\",\"0.15\",\"100\",1499644799999,\"10\",5,\"1\","
-                        "\"2\"]]"; // 11 fields, missing "ignore"
+                       "\"2\"]]"; // 11 fields, missing "ignore"
     market_data_kline_t rows[4];
     uint16_t count = 0;
     CHECK(parse_one_chunk(json, rows, 4, &count) == MARKET_DATA_ERR_PARSE);
@@ -138,7 +137,7 @@ static void test_row_too_few_fields_rejected(void)
 static void test_row_too_many_fields_rejected(void)
 {
     const char *json = "[[1499040000000,\"0.1\",\"0.2\",\"0.1\",\"0.15\",\"100\",1499644799999,\"10\",5,\"1\",\"2\","
-                        "\"0\",\"extra\"]]"; // 13 fields
+                       "\"0\",\"extra\"]]"; // 13 fields
     market_data_kline_t rows[4];
     uint16_t count = 0;
     CHECK(parse_one_chunk(json, rows, 4, &count) == MARKET_DATA_ERR_PARSE);
@@ -147,7 +146,7 @@ static void test_row_too_many_fields_rejected(void)
 static void test_decimal_field_as_number_rejected(void)
 {
     const char *json = "[[1499040000000,0.1,\"0.2\",\"0.1\",\"0.15\",\"100\",1499644799999,\"10\",5,\"1\",\"2\","
-                        "\"0\"]]"; // field 1 ("open") is a JSON number, not a string
+                       "\"0\"]]"; // field 1 ("open") is a JSON number, not a string
     market_data_kline_t rows[4];
     uint16_t count = 0;
     CHECK(parse_one_chunk(json, rows, 4, &count) == MARKET_DATA_ERR_PARSE);

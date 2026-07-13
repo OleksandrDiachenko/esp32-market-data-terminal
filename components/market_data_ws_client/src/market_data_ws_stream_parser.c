@@ -169,7 +169,7 @@ market_data_err_t market_data_ws_stream_parser_feed(market_data_ws_stream_parser
             {
                 p->skip_depth = 0;
                 p->state = skip_advance(&p->skip_depth, tok) ? MARKET_DATA_WSP_EXPECT_ROOT_COMMA_OR_END
-                                                               : MARKET_DATA_WSP_SKIP_ROOT_VALUE;
+                                                             : MARKET_DATA_WSP_SKIP_ROOT_VALUE;
             }
             break;
 
@@ -259,7 +259,7 @@ market_data_err_t market_data_ws_stream_parser_feed(market_data_ws_stream_parser
             {
                 p->skip_depth = 0;
                 p->state = skip_advance(&p->skip_depth, tok) ? MARKET_DATA_WSP_EXPECT_DATA_COMMA_OR_END
-                                                               : MARKET_DATA_WSP_SKIP_DATA_VALUE;
+                                                             : MARKET_DATA_WSP_SKIP_DATA_VALUE;
             }
             break;
 
@@ -411,7 +411,7 @@ market_data_err_t market_data_ws_stream_parser_feed(market_data_ws_stream_parser
             default:
                 p->skip_depth = 0;
                 p->state = skip_advance(&p->skip_depth, tok) ? MARKET_DATA_WSP_EXPECT_K_COMMA_OR_END
-                                                               : MARKET_DATA_WSP_SKIP_K_VALUE;
+                                                             : MARKET_DATA_WSP_SKIP_K_VALUE;
                 break;
             }
             break;

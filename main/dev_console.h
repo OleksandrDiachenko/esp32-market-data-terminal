@@ -10,12 +10,13 @@
 #include "esp_err.h"
 
 #ifdef __cplusplus
-extern "C" {
+extern "C"
+{
 #endif
 
-// Call once, before dev_screenshot_console_register() /
-// display_ui_register_dev_nav_console() (they register into this REPL).
-esp_err_t dev_console_start(void);
+    // Call once, before dev_screenshot_console_register() /
+    // display_ui_register_dev_nav_console() (they register into this REPL).
+    esp_err_t dev_console_start(void);
 
 #ifdef __cplusplus
 }

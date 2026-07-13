@@ -36,9 +36,6 @@ esp_err_t dev_console_start(void)
 
 #else // !CONFIG_DEV_SCREENSHOT_CONSOLE
 
-esp_err_t dev_console_start(void)
-{
-    return ESP_OK;
-}
+esp_err_t dev_console_start(void) { return ESP_OK; }
 
 #endif

@@ -7,8 +7,8 @@ static int64_t bucket_start_for(int64_t open_time_ms, int64_t interval_ms)
     return (open_time_ms / interval_ms) * interval_ms;
 }
 
-bool app_state_kline_merge_apply(market_data_kline_t *candles, uint16_t *count, uint16_t capacity,
-                                  int64_t interval_ms, const market_data_kline_update_t *update)
+bool app_state_kline_merge_apply(market_data_kline_t *candles, uint16_t *count, uint16_t capacity, int64_t interval_ms,
+                                 const market_data_kline_update_t *update)
 {
     if (*count == 0)
     {

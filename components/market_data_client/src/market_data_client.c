@@ -172,8 +172,8 @@ market_data_err_t market_data_client_fetch_ticker_24hr(const char *symbol, marke
 }
 
 market_data_err_t market_data_client_fetch_klines(const market_data_klines_request_t *req,
-                                                    market_data_kline_t *out_klines, uint16_t out_capacity,
-                                                    uint16_t *out_count)
+                                                  market_data_kline_t *out_klines, uint16_t out_capacity,
+                                                  uint16_t *out_count)
 {
     if (req == NULL || out_klines == NULL || out_count == NULL || req->symbol == NULL || req->interval == NULL)
     {
@@ -226,7 +226,7 @@ market_data_err_t market_data_client_fetch_klines(const market_data_klines_reque
 }
 
 market_data_err_t market_data_client_fetch_klines_24h_5m(const char *symbol, market_data_kline_t *out_klines,
-                                                           uint16_t out_capacity, uint16_t *out_count)
+                                                         uint16_t out_capacity, uint16_t *out_count)
 {
     market_data_klines_request_t req = {
         .symbol = symbol,
@@ -239,9 +239,9 @@ market_data_err_t market_data_client_fetch_klines_24h_5m(const char *symbol, mar
 }
 
 market_data_err_t market_data_client_fetch_klines_24h_5m_batch(const char *const *symbols, uint8_t symbol_count,
-                                                                 market_data_kline_t *const *out_klines_per_symbol,
-                                                                 uint16_t out_capacity_per_symbol,
-                                                                 market_data_batch_result_t *out_results)
+                                                               market_data_kline_t *const *out_klines_per_symbol,
+                                                               uint16_t out_capacity_per_symbol,
+                                                               market_data_batch_result_t *out_results)
 {
     if (symbols == NULL || symbol_count == 0 || out_klines_per_symbol == NULL || out_capacity_per_symbol == 0 ||
         out_results == NULL)
@@ -290,7 +290,7 @@ market_data_err_t market_data_client_fetch_klines_24h_5m_batch(const char *const
         // set, it stays valid (and reused via market_data_http_next()) for
         // the rest of the batch even if individual requests fail.
         err = (session == NULL) ? market_data_http_open(url, MARKET_DATA_HTTP_TIMEOUT_MS, &session, &status)
-                                 : market_data_http_next(session, url, MARKET_DATA_HTTP_TIMEOUT_MS, &status);
+                                : market_data_http_next(session, url, MARKET_DATA_HTTP_TIMEOUT_MS, &status);
         if (err != MARKET_DATA_OK)
         {
             out_results[i].err = err;

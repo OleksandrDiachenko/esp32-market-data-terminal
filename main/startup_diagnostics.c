@@ -13,10 +13,8 @@
 static const char *TAG = "startup_diag";
 
 static const char *startup_diagnostics_chip_model_name(esp_chip_model_t model);
-static esp_err_t startup_diagnostics_chip_model(esp_chip_model_t expected_model,
-                                                esp_chip_model_t chip_model);
-static esp_err_t startup_diagnostics_check_internal_heap(uint32_t expected_minimum,
-                                                         uint32_t *out_free_heap);
+static esp_err_t startup_diagnostics_chip_model(esp_chip_model_t expected_model, esp_chip_model_t chip_model);
+static esp_err_t startup_diagnostics_check_internal_heap(uint32_t expected_minimum, uint32_t *out_free_heap);
 
 esp_err_t startup_diagnostics(void)
 {
@@ -32,29 +30,25 @@ esp_err_t startup_diagnostics(void)
         return ESP_FAIL;
     }
 
-    ESP_LOGI(TAG, "Chip model diagnostics passed, model: %s",
-             startup_diagnostics_chip_model_name(chip_info.model));
+    ESP_LOGI(TAG, "Chip model diagnostics passed, model: %s", startup_diagnostics_chip_model_name(chip_info.model));
     ESP_LOGI(TAG, "Chip revision: %d", chip_info.revision);
     ESP_LOGI(TAG, "Chip features: 0x%08X", chip_info.features);
     ESP_LOGI(TAG, "Chip cores: %d", chip_info.cores);
 
     uint32_t internal_free_heap = 0;
-    if (startup_diagnostics_check_internal_heap(INTERNAL_HEAP_EXPECTED_MINIMUM,
-                                                &internal_free_heap) != ESP_OK)
+    if (startup_diagnostics_check_internal_heap(INTERNAL_HEAP_EXPECTED_MINIMUM, &internal_free_heap) != ESP_OK)
     {
         ESP_LOGE(TAG, "Internal heap diagnostics failed, expected minimum: %u, actual: %u",
                  INTERNAL_HEAP_EXPECTED_MINIMUM, internal_free_heap);
         return ESP_FAIL;
     }
-    ESP_LOGI(TAG, "Internal heap diagnostics passed, free heap: %u",
-             internal_free_heap);
+    ESP_LOGI(TAG, "Internal heap diagnostics passed, free heap: %u", internal_free_heap);
 
     ESP_LOGI(TAG, "Startup diagnostics completed.");
     return ESP_OK;
 }
 
-static esp_err_t startup_diagnostics_chip_model(esp_chip_model_t expected_model,
-                                                esp_chip_model_t chip_model)
+static esp_err_t startup_diagnostics_chip_model(esp_chip_model_t expected_model, esp_chip_model_t chip_model)
 {
     if (chip_model == expected_model)
     {
@@ -64,8 +58,7 @@ static esp_err_t startup_diagnostics_chip_model(esp_chip_model_t expected_model,
     return ESP_FAIL;
 }
 
-static esp_err_t startup_diagnostics_check_internal_heap(uint32_t expected_minimum,
-                                                         uint32_t *out_free_heap)
+static esp_err_t startup_diagnostics_check_internal_heap(uint32_t expected_minimum, uint32_t *out_free_heap)
 {
     if (out_free_heap == NULL)
     {

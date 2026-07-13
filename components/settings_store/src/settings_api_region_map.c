@@ -8,19 +8,19 @@
 // see settings_api_region_map.h and
 // docs/decisions/0009-regional-server-auto-selection.md for why.
 static const char *const s_us_tz_labels[] = {
-    "America/Anchorage",    // Alaska
-    "America/Los Angeles",  // Pacific
-    "America/Denver",       // Mountain
-    "America/Phoenix",      // Mountain, no DST (Arizona)
-    "America/Chicago",      // Central
-    "America/Dallas",       // Central
-    "America/New York",     // Eastern
-    "Pacific/Honolulu",     // Hawaii
-    "America/San Juan",     // Puerto Rico
-    "America/St Thomas",    // U.S. Virgin Islands
-    "Pacific/Guam",         // Guam
-    "Pacific/Saipan",       // Northern Mariana Islands
-    "Pacific/Pago Pago",    // American Samoa
+    "America/Anchorage",   // Alaska
+    "America/Los Angeles", // Pacific
+    "America/Denver",      // Mountain
+    "America/Phoenix",     // Mountain, no DST (Arizona)
+    "America/Chicago",     // Central
+    "America/Dallas",      // Central
+    "America/New York",    // Eastern
+    "Pacific/Honolulu",    // Hawaii
+    "America/San Juan",    // Puerto Rico
+    "America/St Thomas",   // U.S. Virgin Islands
+    "Pacific/Guam",        // Guam
+    "Pacific/Saipan",      // Northern Mariana Islands
+    "Pacific/Pago Pago",   // American Samoa
 };
 
 settings_api_region_t settings_api_region_from_tz_label(const char *tz_label)

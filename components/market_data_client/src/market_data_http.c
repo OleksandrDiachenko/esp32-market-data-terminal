@@ -30,7 +30,7 @@ static market_data_err_t map_open_error(esp_err_t err)
 }
 
 market_data_err_t market_data_http_open(const char *url, uint32_t timeout_ms, market_data_http_session_t **out_session,
-                                         int *out_status)
+                                        int *out_status)
 {
     if (url == NULL || out_session == NULL || out_status == NULL)
     {
@@ -85,7 +85,7 @@ market_data_err_t market_data_http_open(const char *url, uint32_t timeout_ms, ma
 }
 
 market_data_err_t market_data_http_next(market_data_http_session_t *session, const char *url, uint32_t timeout_ms,
-                                         int *out_status)
+                                        int *out_status)
 {
     if (session == NULL || url == NULL || out_status == NULL)
     {
@@ -124,7 +124,7 @@ market_data_err_t market_data_http_next(market_data_http_session_t *session, con
 }
 
 market_data_err_t market_data_http_stream_body(market_data_http_session_t *session, market_data_http_body_sink_t sink,
-                                                void *sink_ctx)
+                                               void *sink_ctx)
 {
     if (session == NULL || sink == NULL)
     {
@@ -152,7 +152,7 @@ market_data_err_t market_data_http_stream_body(market_data_http_session_t *sessi
 }
 
 market_data_err_t market_data_http_read_body_snippet(market_data_http_session_t *session, char *out,
-                                                       size_t out_capacity, size_t *out_len)
+                                                     size_t out_capacity, size_t *out_len)
 {
     if (session == NULL || out == NULL || out_capacity == 0)
     {

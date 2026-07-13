@@ -16,12 +16,13 @@
 #include "market_data_client.h" // market_data_err_t
 
 #ifdef __cplusplus
-extern "C" {
+extern "C"
+{
 #endif
 
-market_data_err_t market_data_ws_url_build_combined_stream(const char *base_ws_url, const char *const *symbols,
-                                                            uint8_t symbol_count, const char *stream_suffix,
-                                                            char *out, size_t out_capacity);
+    market_data_err_t market_data_ws_url_build_combined_stream(const char *base_ws_url, const char *const *symbols,
+                                                               uint8_t symbol_count, const char *stream_suffix,
+                                                               char *out, size_t out_capacity);
 
 #ifdef __cplusplus
 }

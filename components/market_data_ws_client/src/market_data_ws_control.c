@@ -7,11 +7,11 @@
 #include "settings_codec.h" // SETTINGS_SYMBOL_MAX_LEN
 
 market_data_err_t market_data_ws_build_control_message(const char *method, const char *symbol,
-                                                        const char *stream_suffix, uint32_t id, char *out,
-                                                        size_t out_capacity)
+                                                       const char *stream_suffix, uint32_t id, char *out,
+                                                       size_t out_capacity)
 {
-    if (method == NULL || method[0] == '\0' || symbol == NULL || stream_suffix == NULL ||
-        stream_suffix[0] == '\0' || out == NULL || out_capacity == 0)
+    if (method == NULL || method[0] == '\0' || symbol == NULL || stream_suffix == NULL || stream_suffix[0] == '\0' ||
+        out == NULL || out_capacity == 0)
     {
         return MARKET_DATA_ERR_INVALID_ARG;
     }
@@ -34,7 +34,7 @@ market_data_err_t market_data_ws_build_control_message(const char *method, const
     lower_symbol[symbol_len] = '\0';
 
     int written = snprintf(out, out_capacity, "{\"method\":\"%s\",\"params\":[\"%s@%s\"],\"id\":%u}", method,
-                            lower_symbol, stream_suffix, (unsigned int)id);
+                           lower_symbol, stream_suffix, (unsigned int)id);
     if (written < 0 || (size_t)written >= out_capacity)
     {
         return MARKET_DATA_ERR_INVALID_ARG;

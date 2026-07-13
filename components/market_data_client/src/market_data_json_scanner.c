@@ -10,20 +10,11 @@ void market_data_json_scanner_init(market_data_json_scanner_t *sc)
     sc->lex_state = MARKET_DATA_JSON_LEX_BETWEEN;
 }
 
-const char *market_data_json_scanner_text(const market_data_json_scanner_t *sc)
-{
-    return sc->scratch;
-}
+const char *market_data_json_scanner_text(const market_data_json_scanner_t *sc) { return sc->scratch; }
 
-size_t market_data_json_scanner_text_len(const market_data_json_scanner_t *sc)
-{
-    return sc->scratch_len;
-}
+size_t market_data_json_scanner_text_len(const market_data_json_scanner_t *sc) { return sc->scratch_len; }
 
-static bool is_json_whitespace(char c)
-{
-    return c == ' ' || c == '\t' || c == '\n' || c == '\r';
-}
+static bool is_json_whitespace(char c) { return c == ' ' || c == '\t' || c == '\n' || c == '\r'; }
 
 static bool is_number_char(char c)
 {
@@ -64,7 +55,7 @@ static market_data_json_token_kind_t single_char_token(char c)
 }
 
 market_data_json_token_kind_t market_data_json_scanner_next(market_data_json_scanner_t *sc, const char **pbuf,
-                                                              size_t *plen, double *out_number)
+                                                            size_t *plen, double *out_number)
 {
     const char *buf = *pbuf;
     size_t len = *plen;

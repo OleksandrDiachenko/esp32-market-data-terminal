@@ -121,7 +121,4 @@ esp_err_t time_sync_start(void)
     return ESP_OK;
 }
 
-bool time_sync_is_synced(void)
-{
-    return synced;
-}
+bool time_sync_is_synced(void) { return synced; }

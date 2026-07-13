@@ -96,7 +96,7 @@ void wifi_policy_init(wifi_policy_t *p, const wifi_policy_config_t *config)
 }
 
 void wifi_policy_set_profiles(wifi_policy_t *p, const wifi_policy_profile_t *profiles, uint8_t count,
-                               const char *last_success_ssid)
+                              const char *last_success_ssid)
 {
     if (count > WIFI_POLICY_MAX_PROFILES)
     {
@@ -149,7 +149,7 @@ void wifi_policy_set_profiles(wifi_policy_t *p, const wifi_policy_profile_t *pro
 // trying up to `remaining` profiles, skipping blocked ones. Requires
 // p->profile_count > 0.
 static uint8_t begin_from(wifi_policy_t *p, uint8_t start_cursor, uint8_t remaining, wifi_policy_action_t *out,
-                           uint8_t max_out, uint8_t n)
+                          uint8_t max_out, uint8_t n)
 {
     uint8_t cursor = start_cursor;
     uint8_t left = remaining;
@@ -201,8 +201,8 @@ static uint8_t on_profile_exhausted(wifi_policy_t *p, wifi_policy_action_t *out,
     return begin_from(p, next_cursor, next_remaining, out, max_out, n);
 }
 
-static uint8_t handle_terminal_failure(wifi_policy_t *p, wifi_policy_fail_class_t fail_class,
-                                        wifi_policy_action_t *out, uint8_t max_out, uint8_t n)
+static uint8_t handle_terminal_failure(wifi_policy_t *p, wifi_policy_fail_class_t fail_class, wifi_policy_action_t *out,
+                                       uint8_t max_out, uint8_t n)
 {
     wifi_policy_event_t fail_event =
         (fail_class == WIFI_POLICY_FAIL_AUTH) ? WIFI_POLICY_EVENT_AUTH_FAILED : WIFI_POLICY_EVENT_CONNECT_FAILED;
@@ -266,7 +266,7 @@ static uint8_t handle_terminal_failure(wifi_policy_t *p, wifi_policy_fail_class_
     {
         p->pending_retry_kind = WIFI_POLICY_RETRY_SAME_PROFILE;
         uint32_t delay = wifi_policy_backoff_delay_ms(p->config.retry_base_delay_ms, p->config.retry_max_delay_ms,
-                                                        p->current_attempt);
+                                                      p->current_attempt);
         n = emit(out, max_out, n, act_retry_timer(delay));
         return n;
     }
@@ -274,8 +274,7 @@ static uint8_t handle_terminal_failure(wifi_policy_t *p, wifi_policy_fail_class_
     return on_profile_exhausted(p, out, max_out, n);
 }
 
-uint8_t wifi_policy_handle(wifi_policy_t *p, const wifi_policy_input_t *in, wifi_policy_action_t *out,
-                            uint8_t max_out)
+uint8_t wifi_policy_handle(wifi_policy_t *p, const wifi_policy_input_t *in, wifi_policy_action_t *out, uint8_t max_out)
 {
     uint8_t n = 0;
 
@@ -404,8 +403,7 @@ uint8_t wifi_policy_handle(wifi_policy_t *p, const wifi_policy_input_t *in, wifi
         // may already be in flight for the old target, and the adapter no
         // longer disconnects on our behalf before every connect - only what
         // we explicitly ask for via ACT_DISCONNECT.
-        bool needs_teardown =
-            (p->state == WIFI_POLICY_STATE_CONNECTED || p->state == WIFI_POLICY_STATE_CONNECTING);
+        bool needs_teardown = (p->state == WIFI_POLICY_STATE_CONNECTED || p->state == WIFI_POLICY_STATE_CONNECTING);
         if (needs_teardown)
         {
             copy_ssid(p->fallback_ssid, p->current_ssid);
@@ -444,8 +442,7 @@ uint8_t wifi_policy_handle(wifi_policy_t *p, const wifi_policy_input_t *in, wifi
             }
         }
         {
-            bool needs_teardown =
-                (p->state == WIFI_POLICY_STATE_CONNECTED || p->state == WIFI_POLICY_STATE_CONNECTING);
+            bool needs_teardown = (p->state == WIFI_POLICY_STATE_CONNECTED || p->state == WIFI_POLICY_STATE_CONNECTING);
             if (needs_teardown)
             {
                 n = emit(out, max_out, n, act_disconnect());
@@ -548,15 +545,9 @@ uint8_t wifi_policy_handle(wifi_policy_t *p, const wifi_policy_input_t *in, wifi
     }
 }
 
-wifi_policy_state_t wifi_policy_state(const wifi_policy_t *p)
-{
-    return p->state;
-}
+wifi_policy_state_t wifi_policy_state(const wifi_policy_t *p) { return p->state; }
 
-bool wifi_policy_is_teardown_pending(const wifi_policy_t *p)
-{
-    return p->teardown_pending;
-}
+bool wifi_policy_is_teardown_pending(const wifi_policy_t *p) { return p->teardown_pending; }
 
 uint32_t wifi_policy_backoff_delay_ms(uint32_t base_ms, uint32_t max_ms, uint8_t attempt)
 {
@@ -594,8 +585,7 @@ wifi_policy_fail_class_t wifi_policy_classify_reason(uint8_t reason)
 }
 
 uint8_t wifi_policy_sort_scan(wifi_policy_scan_ap_t *aps, uint8_t count, uint8_t max_out,
-                               const wifi_policy_profile_t *profiles, uint8_t profile_count,
-                               const char *connected_ssid)
+                              const wifi_policy_profile_t *profiles, uint8_t profile_count, const char *connected_ssid)
 {
     uint8_t unique_count = 0;
     for (uint8_t i = 0; i < count; i++)

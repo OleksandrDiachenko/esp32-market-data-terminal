@@ -79,7 +79,8 @@ static void test_klines_url_with_start_and_end_time(void)
     };
     char out[160];
     CHECK(market_data_url_build_klines("https://api.binance.com", &req, out, sizeof(out)) == MARKET_DATA_OK);
-    CHECK_STREQ(out, "https://api.binance.com/api/v3/klines?symbol=ETHUSDT&interval=1h&limit=100&startTime=1000&endTime=2000");
+    CHECK_STREQ(
+        out, "https://api.binance.com/api/v3/klines?symbol=ETHUSDT&interval=1h&limit=100&startTime=1000&endTime=2000");
 }
 
 static void test_klines_url_rejects_limit_over_max(void)

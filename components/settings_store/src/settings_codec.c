@@ -21,7 +21,7 @@ uint32_t settings_codec_crc32(const void *data, size_t len)
         crc ^= bytes[i];
         for (int bit = 0; bit < 8; bit++)
         {
-            uint32_t mask = (uint32_t) - (int32_t)(crc & 1u);
+            uint32_t mask = (uint32_t)-(int32_t)(crc & 1u);
             crc = (crc >> 1) ^ (0xEDB88320u & mask);
         }
     }
@@ -46,7 +46,7 @@ void settings_codec_seal(void *record, size_t record_size, size_t crc_offset, ui
 }
 
 settings_codec_status_t settings_codec_validate(const void *record, size_t record_size, size_t crc_offset,
-                                                 uint32_t magic, uint16_t version)
+                                                uint32_t magic, uint16_t version)
 {
     const uint8_t *bytes = (const uint8_t *)record;
 
@@ -79,11 +79,16 @@ settings_codec_status_t settings_codec_validate(const void *record, size_t recor
     return SETTINGS_CODEC_OK;
 }
 
-_Static_assert(sizeof(display_settings_t) <= SETTINGS_CODEC_MAX_RECORD_SIZE, "display_settings_t exceeds codec scratch buffer");
-_Static_assert(sizeof(symbol_settings_t) <= SETTINGS_CODEC_MAX_RECORD_SIZE, "symbol_settings_t exceeds codec scratch buffer");
-_Static_assert(sizeof(locale_settings_t) <= SETTINGS_CODEC_MAX_RECORD_SIZE, "locale_settings_t exceeds codec scratch buffer");
-_Static_assert(sizeof(api_region_settings_t) <= SETTINGS_CODEC_MAX_RECORD_SIZE, "api_region_settings_t exceeds codec scratch buffer");
-_Static_assert(sizeof(disclaimer_settings_t) <= SETTINGS_CODEC_MAX_RECORD_SIZE, "disclaimer_settings_t exceeds codec scratch buffer");
+_Static_assert(sizeof(display_settings_t) <= SETTINGS_CODEC_MAX_RECORD_SIZE,
+               "display_settings_t exceeds codec scratch buffer");
+_Static_assert(sizeof(symbol_settings_t) <= SETTINGS_CODEC_MAX_RECORD_SIZE,
+               "symbol_settings_t exceeds codec scratch buffer");
+_Static_assert(sizeof(locale_settings_t) <= SETTINGS_CODEC_MAX_RECORD_SIZE,
+               "locale_settings_t exceeds codec scratch buffer");
+_Static_assert(sizeof(api_region_settings_t) <= SETTINGS_CODEC_MAX_RECORD_SIZE,
+               "api_region_settings_t exceeds codec scratch buffer");
+_Static_assert(sizeof(disclaimer_settings_t) <= SETTINGS_CODEC_MAX_RECORD_SIZE,
+               "disclaimer_settings_t exceeds codec scratch buffer");
 
 void settings_display_init_default(display_settings_t *out)
 {
@@ -119,13 +124,13 @@ void settings_locale_init_default(locale_settings_t *out)
 void settings_display_seal(display_settings_t *db)
 {
     settings_codec_seal(db, sizeof(*db), offsetof(display_settings_t, crc32), SETTINGS_DISPLAY_MAGIC,
-                         SETTINGS_DISPLAY_VERSION);
+                        SETTINGS_DISPLAY_VERSION);
 }
 
 settings_codec_status_t settings_display_validate(const display_settings_t *db)
 {
     settings_codec_status_t status = settings_codec_validate(db, sizeof(*db), offsetof(display_settings_t, crc32),
-                                                               SETTINGS_DISPLAY_MAGIC, SETTINGS_DISPLAY_VERSION);
+                                                             SETTINGS_DISPLAY_MAGIC, SETTINGS_DISPLAY_VERSION);
     if (status != SETTINGS_CODEC_OK)
     {
         return status;
@@ -152,13 +157,13 @@ settings_codec_status_t settings_display_validate(const display_settings_t *db)
 void settings_symbols_seal(symbol_settings_t *db)
 {
     settings_codec_seal(db, sizeof(*db), offsetof(symbol_settings_t, crc32), SETTINGS_SYMBOLS_MAGIC,
-                         SETTINGS_SYMBOLS_VERSION);
+                        SETTINGS_SYMBOLS_VERSION);
 }
 
 settings_codec_status_t settings_symbols_validate(const symbol_settings_t *db)
 {
     settings_codec_status_t status = settings_codec_validate(db, sizeof(*db), offsetof(symbol_settings_t, crc32),
-                                                               SETTINGS_SYMBOLS_MAGIC, SETTINGS_SYMBOLS_VERSION);
+                                                             SETTINGS_SYMBOLS_MAGIC, SETTINGS_SYMBOLS_VERSION);
     if (status != SETTINGS_CODEC_OK)
     {
         return status;
@@ -176,13 +181,13 @@ void settings_locale_seal(locale_settings_t *db)
     db->date_format[SETTINGS_DATE_FORMAT_MAX_LEN] = '\0';
     db->tz_label[SETTINGS_TZ_LABEL_MAX_LEN] = '\0';
     settings_codec_seal(db, sizeof(*db), offsetof(locale_settings_t, crc32), SETTINGS_LOCALE_MAGIC,
-                         SETTINGS_LOCALE_VERSION);
+                        SETTINGS_LOCALE_VERSION);
 }
 
 settings_codec_status_t settings_locale_validate(const locale_settings_t *db)
 {
     return settings_codec_validate(db, sizeof(*db), offsetof(locale_settings_t, crc32), SETTINGS_LOCALE_MAGIC,
-                                    SETTINGS_LOCALE_VERSION);
+                                   SETTINGS_LOCALE_VERSION);
 }
 
 void settings_api_region_init_default(api_region_settings_t *out)
@@ -197,13 +202,13 @@ void settings_api_region_init_default(api_region_settings_t *out)
 void settings_api_region_seal(api_region_settings_t *db)
 {
     settings_codec_seal(db, sizeof(*db), offsetof(api_region_settings_t, crc32), SETTINGS_API_REGION_MAGIC,
-                         SETTINGS_API_REGION_VERSION);
+                        SETTINGS_API_REGION_VERSION);
 }
 
 settings_codec_status_t settings_api_region_validate(const api_region_settings_t *db)
 {
-    settings_codec_status_t status = settings_codec_validate(
-        db, sizeof(*db), offsetof(api_region_settings_t, crc32), SETTINGS_API_REGION_MAGIC, SETTINGS_API_REGION_VERSION);
+    settings_codec_status_t status = settings_codec_validate(db, sizeof(*db), offsetof(api_region_settings_t, crc32),
+                                                             SETTINGS_API_REGION_MAGIC, SETTINGS_API_REGION_VERSION);
     if (status != SETTINGS_CODEC_OK)
     {
         return status;
@@ -231,13 +236,13 @@ void settings_disclaimer_seal(disclaimer_settings_t *db)
 {
     db->acked_fw_version[SETTINGS_ACKED_FW_VERSION_MAX_LEN] = '\0';
     settings_codec_seal(db, sizeof(*db), offsetof(disclaimer_settings_t, crc32), SETTINGS_DISCLAIMER_MAGIC,
-                         SETTINGS_DISCLAIMER_VERSION);
+                        SETTINGS_DISCLAIMER_VERSION);
 }
 
 settings_codec_status_t settings_disclaimer_validate(const disclaimer_settings_t *db)
 {
     return settings_codec_validate(db, sizeof(*db), offsetof(disclaimer_settings_t, crc32), SETTINGS_DISCLAIMER_MAGIC,
-                                    SETTINGS_DISCLAIMER_VERSION);
+                                   SETTINGS_DISCLAIMER_VERSION);
 }
 
 bool settings_disclaimer_should_show(const char *acked, const char *running)

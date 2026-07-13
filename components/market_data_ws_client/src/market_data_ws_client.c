@@ -34,14 +34,13 @@ static esp_err_t send_control_message(const char *method, const char *symbol)
     }
 
     char msg[WS_CONTROL_MSG_MAX];
-    if (market_data_ws_build_control_message(method, symbol, WS_STREAM_SUFFIX, s_next_control_id++, msg,
-                                              sizeof(msg)) != MARKET_DATA_OK)
+    if (market_data_ws_build_control_message(method, symbol, WS_STREAM_SUFFIX, s_next_control_id++, msg, sizeof(msg)) !=
+        MARKET_DATA_OK)
     {
         return ESP_ERR_INVALID_ARG;
     }
 
-    int written = esp_websocket_client_send_text(s_client, msg, (int)strlen(msg),
-                                                  pdMS_TO_TICKS(WS_SEND_TIMEOUT_MS));
+    int written = esp_websocket_client_send_text(s_client, msg, (int)strlen(msg), pdMS_TO_TICKS(WS_SEND_TIMEOUT_MS));
     if (written < 0)
     {
         ESP_LOGW(TAG, "Failed to send %s control frame for '%s'", method, symbol);
@@ -62,8 +61,7 @@ static const char *select_base_ws_url(void)
 {
     api_region_settings_t region;
     settings_store_load_api_region(&region); // always ESP_OK, defaults substituted on corruption
-    return region.region == SETTINGS_API_REGION_US ? "wss://stream.binance.us:9443"
-                                                     : "wss://stream.binance.com:9443";
+    return region.region == SETTINGS_API_REGION_US ? "wss://stream.binance.us:9443" : "wss://stream.binance.com:9443";
 }
 
 static void handle_data_event(const esp_websocket_event_data_t *data)
@@ -143,7 +141,7 @@ esp_err_t market_data_ws_client_create(const char *const *symbols, uint8_t symbo
 
     char url[WS_URL_MAX];
     if (market_data_ws_url_build_combined_stream(select_base_ws_url(), symbols, symbol_count, WS_STREAM_SUFFIX, url,
-                                                  sizeof(url)) != MARKET_DATA_OK)
+                                                 sizeof(url)) != MARKET_DATA_OK)
     {
         return ESP_ERR_INVALID_ARG;
     }
@@ -208,17 +206,8 @@ void market_data_ws_client_stop(void)
     }
 }
 
-QueueHandle_t market_data_ws_client_get_update_queue(void)
-{
-    return s_update_queue;
-}
+QueueHandle_t market_data_ws_client_get_update_queue(void) { return s_update_queue; }
 
-esp_err_t market_data_ws_client_subscribe(const char *symbol)
-{
-    return send_control_message("SUBSCRIBE", symbol);
-}
+esp_err_t market_data_ws_client_subscribe(const char *symbol) { return send_control_message("SUBSCRIBE", symbol); }
 
-esp_err_t market_data_ws_client_unsubscribe(const char *symbol)
-{
-    return send_control_message("UNSUBSCRIBE", symbol);
-}
+esp_err_t market_data_ws_client_unsubscribe(const char *symbol) { return send_control_message("UNSUBSCRIBE", symbol); }

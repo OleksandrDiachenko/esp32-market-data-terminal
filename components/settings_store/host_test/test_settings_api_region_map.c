@@ -4,10 +4,9 @@
 static void test_us_states_and_territories_map_to_us(void)
 {
     static const char *const us_labels[] = {
-        "America/Anchorage",   "America/Los Angeles", "America/Denver",    "America/Phoenix",
-        "America/Chicago",     "America/Dallas",       "America/New York", "Pacific/Honolulu",
-        "America/San Juan",    "America/St Thomas",    "Pacific/Guam",     "Pacific/Saipan",
-        "Pacific/Pago Pago",
+        "America/Anchorage", "America/Los Angeles", "America/Denver",    "America/Phoenix",  "America/Chicago",
+        "America/Dallas",    "America/New York",    "Pacific/Honolulu",  "America/San Juan", "America/St Thomas",
+        "Pacific/Guam",      "Pacific/Saipan",      "Pacific/Pago Pago",
     };
     for (size_t i = 0; i < sizeof(us_labels) / sizeof(us_labels[0]); i++)
     {
@@ -21,10 +20,9 @@ static void test_us_states_and_territories_map_to_us(void)
 static void test_non_us_americas_map_to_intl(void)
 {
     static const char *const non_us_labels[] = {
-        "America/Toronto",     "America/Vancouver", "America/Calgary",    "America/Winnipeg",
-        "America/Halifax",     "America/St Johns",  "America/Mexico City", "America/Havana",
-        "America/Guatemala",   "America/Panama",    "America/Bogota",      "America/Buenos Aires",
-        "America/Sao Paulo",
+        "America/Toronto",  "America/Vancouver",    "America/Calgary",   "America/Winnipeg",  "America/Halifax",
+        "America/St Johns", "America/Mexico City",  "America/Havana",    "America/Guatemala", "America/Panama",
+        "America/Bogota",   "America/Buenos Aires", "America/Sao Paulo",
     };
     for (size_t i = 0; i < sizeof(non_us_labels) / sizeof(non_us_labels[0]); i++)
     {

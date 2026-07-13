@@ -122,7 +122,7 @@ market_data_err_t market_data_symbol_parser_feed(market_data_symbol_parser_t *p,
             {
                 p->skip_depth = 0;
                 p->state = skip_advance(&p->skip_depth, tok) ? MARKET_DATA_SYP_EXPECT_ROOT_COMMA_OR_END
-                                                               : MARKET_DATA_SYP_SKIP_ROOT_VALUE;
+                                                             : MARKET_DATA_SYP_SKIP_ROOT_VALUE;
             }
             break;
 
@@ -202,7 +202,7 @@ market_data_err_t market_data_symbol_parser_feed(market_data_symbol_parser_t *p,
             {
                 p->skip_depth = 0;
                 p->state = skip_advance(&p->skip_depth, tok) ? MARKET_DATA_SYP_EXPECT_SYMBOL_COMMA_OR_END
-                                                               : MARKET_DATA_SYP_SKIP_SYMBOL_VALUE;
+                                                             : MARKET_DATA_SYP_SKIP_SYMBOL_VALUE;
             }
             break;
 

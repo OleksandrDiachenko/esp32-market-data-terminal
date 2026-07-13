@@ -10,13 +10,14 @@
 #include "settings_codec.h"
 
 #ifdef __cplusplus
-extern "C" {
+extern "C"
+{
 #endif
 
-// Returns SETTINGS_API_REGION_US if tz_label is one of the U.S.
-// state/territory labels in the allow-list, SETTINGS_API_REGION_INTL
-// otherwise (including NULL or an empty/never-set label).
-settings_api_region_t settings_api_region_from_tz_label(const char *tz_label);
+    // Returns SETTINGS_API_REGION_US if tz_label is one of the U.S.
+    // state/territory labels in the allow-list, SETTINGS_API_REGION_INTL
+    // otherwise (including NULL or an empty/never-set label).
+    settings_api_region_t settings_api_region_from_tz_label(const char *tz_label);
 
 #ifdef __cplusplus
 }

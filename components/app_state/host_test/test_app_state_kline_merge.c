@@ -14,7 +14,7 @@ static bool dbl_eq(double a, double b)
 }
 
 static market_data_kline_t make_candle(int64_t open_time_ms, double open, double high, double low, double close,
-                                        double volume, uint32_t trades)
+                                       double volume, uint32_t trades)
 {
     market_data_kline_t k;
     memset(&k, 0, sizeof(k));
@@ -28,8 +28,8 @@ static market_data_kline_t make_candle(int64_t open_time_ms, double open, double
     return k;
 }
 
-static market_data_kline_update_t make_update(int64_t open_time_ms, double open, double high, double low,
-                                               double close, double volume, uint32_t trades, bool is_final)
+static market_data_kline_update_t make_update(int64_t open_time_ms, double open, double high, double low, double close,
+                                              double volume, uint32_t trades, bool is_final)
 {
     market_data_kline_update_t u;
     memset(&u, 0, sizeof(u));

@@ -4,11 +4,9 @@
 static void test_sort_dedupe_cap(void)
 {
     wifi_policy_scan_ap_t aps[5] = {
-        {.ssid = "A", .rssi = -70},
-        {.ssid = "B", .rssi = -40},
+        {.ssid = "A", .rssi = -70}, {.ssid = "B", .rssi = -40},
         {.ssid = "A", .rssi = -50}, // duplicate SSID, stronger signal
-        {.ssid = "C", .rssi = -60},
-        {.ssid = "D", .rssi = -90},
+        {.ssid = "C", .rssi = -60}, {.ssid = "D", .rssi = -90},
     };
 
     wifi_policy_profile_t profiles[1] = {{.ssid = "B", .blocked = false}};
@@ -52,8 +50,8 @@ static void test_secured_field_preserved(void)
 
     CHECK(count == 2);
     CHECK_STREQ(aps[0].ssid, "Secure");
-    CHECK(aps[0].rssi == -40);  // rssi refreshed from the stronger duplicate
-    CHECK(aps[0].secured);      // secured NOT refreshed - keeps the first-seen BSSID's value
+    CHECK(aps[0].rssi == -40); // rssi refreshed from the stronger duplicate
+    CHECK(aps[0].secured);     // secured NOT refreshed - keeps the first-seen BSSID's value
 
     CHECK_STREQ(aps[1].ssid, "Open");
     CHECK(!aps[1].secured);

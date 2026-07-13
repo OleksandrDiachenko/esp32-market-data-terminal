@@ -44,7 +44,7 @@ static const char *TAG = "display_ui";
 #define SETTINGS_LIST_HEADER_HEIGHT_PX 64
 #define SUBHEADER_HEIGHT_PX 64
 #define SETTINGS_ICON_CHIP_PX 40
-#define TIME_LIST_ROW_HEIGHT_PX 60 // Time format / Date format / Time zones list rows
+#define TIME_LIST_ROW_HEIGHT_PX 60       // Time format / Date format / Time zones list rows
 #define WIFI_PASSWORD_FIELD_HEIGHT_PX 54 // matches the eye-toggle button below it
 #define UPDATE_PERIOD_MS 1000
 // lv_refr_now() completes when the last LVGL stripe has been copied into
@@ -72,7 +72,8 @@ static const char *TAG = "display_ui";
 #define COLOR_STATUSBAR_BG lv_color_hex(0x0F1216)
 #define COLOR_TEXT lv_color_hex(0xECEEF2)
 #define COLOR_MUTED lv_color_hex(0x6E7686)
-#define COLOR_MUTED_DIM lv_color_hex(0x454C59) // darker than COLOR_MUTED - low-emphasis chrome like the drag-handle dots
+#define COLOR_MUTED_DIM                                                                                                \
+    lv_color_hex(0x454C59) // darker than COLOR_MUTED - low-emphasis chrome like the drag-handle dots
 #define COLOR_UP lv_color_hex(0x2FD481)
 #define COLOR_DOWN lv_color_hex(0xFF5D6C)
 #define COLOR_WARN lv_color_hex(0xF2A93C)
@@ -324,14 +325,14 @@ static bool s_watchlist_match_valid;
 // --- Updates (Settings > Updates) ---
 
 static lv_obj_t *s_updates_screen;
-static lv_obj_t *s_updates_state_card;    // tinted card - color/icon/text set per-state in updates_screen_reset()
+static lv_obj_t *s_updates_state_card; // tinted card - color/icon/text set per-state in updates_screen_reset()
 static lv_obj_t *s_updates_state_icon;
 static lv_obj_t *s_updates_state_text;
 static lv_obj_t *s_updates_current_version_label;
 static lv_obj_t *s_updates_latest_version_label;
 static lv_obj_t *s_updates_last_checked_label;
 static lv_obj_t *s_updates_status_label; // "Installing...", or an error - hidden otherwise
-static lv_obj_t *s_updates_progress_row;   // bar + percent label, shown only while installing
+static lv_obj_t *s_updates_progress_row; // bar + percent label, shown only while installing
 static lv_obj_t *s_updates_progress_bar;
 static lv_obj_t *s_updates_progress_label;
 // One button, context-dependent - "Check for updates" normally, "Install
@@ -388,12 +389,11 @@ static void ui_mem_collect(ui_mem_snapshot_t *out)
     out->settings_view = (int)s_settings_view;
     out->wifi_rows = s_wifi_rendered_count;
     out->resident_subscreens = (s_locale_screen != NULL) + (s_time_format_screen != NULL) +
-                                (s_date_format_screen != NULL) + (s_time_zone_screen != NULL) +
-                                (s_time_zone_city_screen != NULL) + (s_region_screen != NULL) +
-                                (s_display_screen != NULL) + (s_wifi_screen != NULL) +
-                                (s_wifi_password_screen != NULL) + (s_watchlist_manage_screen != NULL) +
-                                (s_watchlist_add_screen != NULL) + (s_updates_screen != NULL) +
-                                (s_about_screen != NULL);
+                               (s_date_format_screen != NULL) + (s_time_zone_screen != NULL) +
+                               (s_time_zone_city_screen != NULL) + (s_region_screen != NULL) +
+                               (s_display_screen != NULL) + (s_wifi_screen != NULL) + (s_wifi_password_screen != NULL) +
+                               (s_watchlist_manage_screen != NULL) + (s_watchlist_add_screen != NULL) +
+                               (s_updates_screen != NULL) + (s_about_screen != NULL);
 }
 
 // Thresholds derived from on-device measurement (see decision
@@ -418,8 +418,8 @@ static bool ui_mem_can_build(const char *what)
     lv_mem_monitor(&mon);
     if (mon.free_size < UI_MEM_MIN_FREE_BYTES || mon.free_biggest_size < UI_MEM_MIN_BIGGEST_BYTES)
     {
-        ESP_LOGW(TAG, "LVGL pool low, truncating %s (free=%u biggest=%u used_pct=%u%%)", what,
-                 (unsigned)mon.free_size, (unsigned)mon.free_biggest_size, (unsigned)mon.used_pct);
+        ESP_LOGW(TAG, "LVGL pool low, truncating %s (free=%u biggest=%u used_pct=%u%%)", what, (unsigned)mon.free_size,
+                 (unsigned)mon.free_biggest_size, (unsigned)mon.used_pct);
         return false;
     }
     return true;
@@ -1206,7 +1206,7 @@ static void nav_click_cb(lv_event_t *e)
         wifi_manager_resume_autoconnect();
     }
     set_active_screen(s_active_screen == DISPLAY_UI_SCREEN_WATCHLIST ? DISPLAY_UI_SCREEN_SETTINGS
-                                                                      : DISPLAY_UI_SCREEN_WATCHLIST);
+                                                                     : DISPLAY_UI_SCREEN_WATCHLIST);
 }
 
 static void settings_back_cb(lv_event_t *e)
@@ -1219,9 +1219,11 @@ static void settings_back_cb(lv_event_t *e)
     show_settings_view(SETTINGS_VIEW_LIST);
 }
 
-static void tz_describe(const char *tz_label, const char *posix, char *out, size_t out_len); // with the Time screens, below
-static bool wifi_ap_is_live_connected(const wifi_manager_snapshot_t *snap, const char *ssid); // with the Wi-Fi screens, below
-static uint8_t wifi_rssi_to_bars(int8_t rssi);                                                // with the Wi-Fi screens, below
+static void tz_describe(const char *tz_label, const char *posix, char *out,
+                        size_t out_len); // with the Time screens, below
+static bool wifi_ap_is_live_connected(const wifi_manager_snapshot_t *snap,
+                                      const char *ssid); // with the Wi-Fi screens, below
+static uint8_t wifi_rssi_to_bars(int8_t rssi);           // with the Wi-Fi screens, below
 
 // Looks up the RSSI of the currently-connected network from the latest scan
 // pass, for the status bar's signal icon. Same staleness caveat as
@@ -1336,7 +1338,7 @@ static void update_statusbar(void)
         watchlist_count = SETTINGS_MAX_WATCHLIST; // defensive; settings_store already bounds this
     }
     lv_label_set_text_fmt(s_settings_watchlist_row_desc, "%u of %u Binance pairs", (unsigned)watchlist_count,
-                           (unsigned)SETTINGS_MAX_WATCHLIST);
+                          (unsigned)SETTINGS_MAX_WATCHLIST);
 
     app_state_ota_info_t ota_info;
     app_state_get_ota_info(&ota_info);
@@ -1495,8 +1497,7 @@ static void asymmetric_hit_test_cb(lv_event_t *e)
     a.y1 -= pad->top;
     a.y2 += pad->bottom;
 
-    info->res = (info->point->x >= a.x1 && info->point->x <= a.x2 && info->point->y >= a.y1 &&
-                 info->point->y <= a.y2);
+    info->res = (info->point->x >= a.x1 && info->point->x <= a.x2 && info->point->y >= a.y1 && info->point->y <= a.y2);
 }
 
 // Same 4-bar signal glyph as build_signal_icon() (see the Wi-Fi list rows,
@@ -1508,9 +1509,9 @@ static void build_statusbar_signal_icon(lv_obj_t *parent)
     lv_obj_t *box = lv_obj_create(parent);
     lv_obj_remove_style_all(box);
     lv_obj_remove_flag(box, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CLICK_FOCUSABLE | LV_OBJ_FLAG_SCROLLABLE |
-                                 LV_OBJ_FLAG_SCROLL_ELASTIC | LV_OBJ_FLAG_SCROLL_MOMENTUM |
-                                 LV_OBJ_FLAG_SCROLL_CHAIN | LV_OBJ_FLAG_SCROLL_WITH_ARROW |
-                                 LV_OBJ_FLAG_SNAPPABLE | LV_OBJ_FLAG_PRESS_LOCK | LV_OBJ_FLAG_GESTURE_BUBBLE);
+                                LV_OBJ_FLAG_SCROLL_ELASTIC | LV_OBJ_FLAG_SCROLL_MOMENTUM | LV_OBJ_FLAG_SCROLL_CHAIN |
+                                LV_OBJ_FLAG_SCROLL_WITH_ARROW | LV_OBJ_FLAG_SNAPPABLE | LV_OBJ_FLAG_PRESS_LOCK |
+                                LV_OBJ_FLAG_GESTURE_BUBBLE);
     lv_obj_set_size(box, 24, 18);
     lv_obj_set_flex_flow(box, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(box, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_END);
@@ -1521,9 +1522,9 @@ static void build_statusbar_signal_icon(lv_obj_t *parent)
         lv_obj_t *bar = lv_obj_create(box);
         lv_obj_remove_style_all(bar);
         lv_obj_remove_flag(bar, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CLICK_FOCUSABLE | LV_OBJ_FLAG_SCROLLABLE |
-                                     LV_OBJ_FLAG_SCROLL_ELASTIC | LV_OBJ_FLAG_SCROLL_MOMENTUM |
-                                     LV_OBJ_FLAG_SCROLL_CHAIN | LV_OBJ_FLAG_SCROLL_WITH_ARROW |
-                                     LV_OBJ_FLAG_SNAPPABLE | LV_OBJ_FLAG_PRESS_LOCK | LV_OBJ_FLAG_GESTURE_BUBBLE);
+                                    LV_OBJ_FLAG_SCROLL_ELASTIC | LV_OBJ_FLAG_SCROLL_MOMENTUM |
+                                    LV_OBJ_FLAG_SCROLL_CHAIN | LV_OBJ_FLAG_SCROLL_WITH_ARROW | LV_OBJ_FLAG_SNAPPABLE |
+                                    LV_OBJ_FLAG_PRESS_LOCK | LV_OBJ_FLAG_GESTURE_BUBBLE);
         lv_obj_set_size(bar, 4, heights[i]);
         lv_obj_set_style_radius(bar, 1, 0);
         lv_obj_set_style_bg_opa(bar, LV_OPA_COVER, 0);
@@ -1564,9 +1565,9 @@ static void build_statusbar(lv_obj_t *screen)
     lv_obj_t *right = lv_obj_create(bar);
     lv_obj_remove_style_all(right);
     lv_obj_remove_flag(right, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CLICK_FOCUSABLE | LV_OBJ_FLAG_SCROLLABLE |
-                                   LV_OBJ_FLAG_SCROLL_ELASTIC | LV_OBJ_FLAG_SCROLL_MOMENTUM |
-                                   LV_OBJ_FLAG_SCROLL_CHAIN | LV_OBJ_FLAG_SCROLL_WITH_ARROW |
-                                   LV_OBJ_FLAG_SNAPPABLE | LV_OBJ_FLAG_PRESS_LOCK | LV_OBJ_FLAG_GESTURE_BUBBLE);
+                                  LV_OBJ_FLAG_SCROLL_ELASTIC | LV_OBJ_FLAG_SCROLL_MOMENTUM | LV_OBJ_FLAG_SCROLL_CHAIN |
+                                  LV_OBJ_FLAG_SCROLL_WITH_ARROW | LV_OBJ_FLAG_SNAPPABLE | LV_OBJ_FLAG_PRESS_LOCK |
+                                  LV_OBJ_FLAG_GESTURE_BUBBLE);
     // Width defaults to LV_DPI_DEF (a fixed ~130px), not content-fitting -
     // left unset, "Exit" (wider than "Settings") would overflow past that
     // fixed box and clip on the left since this container is packed flush
@@ -1761,7 +1762,7 @@ static void style_dark_roller(lv_obj_t *roller)
 // description column, and a chevron. Returns the description label so the
 // caller can keep it updated with live state (Wi-Fi status, clock format).
 static lv_obj_t *build_settings_row(lv_obj_t *parent, const char *icon_symbol, const char *title, const char *desc,
-                                     lv_event_cb_t click_cb)
+                                    lv_event_cb_t click_cb)
 {
     lv_obj_t *row = lv_obj_create(parent);
     lv_obj_remove_style_all(row);
@@ -1824,7 +1825,7 @@ static lv_obj_t *build_settings_row(lv_obj_t *parent, const char *icon_symbol, c
 // the created label is returned so the caller can keep it live-updated
 // (e.g. "N of 10") - NULL is returned when subtitle is NULL.
 static lv_obj_t *build_subscreen_header(lv_obj_t *parent, const char *title, const char *subtitle,
-                                         lv_event_cb_t back_cb)
+                                        lv_event_cb_t back_cb)
 {
     lv_obj_t *header = lv_obj_create(parent);
     lv_obj_remove_style_all(header);
@@ -1935,7 +1936,7 @@ static lv_obj_t *build_nav_row(lv_obj_t *parent, const char *title, lv_event_cb_
 // region (see show_time_zone_cities()) so it can't pre-create hidden
 // checkmarks the way the fixed-length Time format/Date format lists do.
 static lv_obj_t *build_selectable_row(lv_obj_t *parent, const char *title, bool is_current, lv_event_cb_t click_cb,
-                                       void *user_data)
+                                      void *user_data)
 {
     lv_obj_t *row = lv_obj_create(parent);
     lv_obj_remove_style_all(row);
@@ -1976,7 +1977,7 @@ static lv_obj_t *build_selectable_row(lv_obj_t *parent, const char *title, bool 
 // out_value_label, the value label to keep updated (see
 // display_refresh_night_time_values()).
 static lv_obj_t *build_time_value_row(lv_obj_t *parent, const char *title, lv_event_cb_t click_cb,
-                                       lv_obj_t **out_value_label)
+                                      lv_obj_t **out_value_label)
 {
     lv_obj_t *row = lv_obj_create(parent);
     lv_obj_remove_style_all(row);
@@ -2060,8 +2061,8 @@ static lv_obj_t *build_switch_row(lv_obj_t *parent, const char *title, lv_event_
 // caller fills with rows (build_nav_row()/build_selectable_row()). Mirrors
 // the outer-plain/inner-scrollable split already used by the Wi-Fi and
 // Watchlist manage screens (see s_wifi_list/s_watchlist_list).
-static lv_obj_t *build_time_subscreen(lv_obj_t *screen, lv_obj_t **out_screen, const char *title,
-                                       const char *subtitle, lv_obj_t **out_subtitle_label, lv_event_cb_t back_cb)
+static lv_obj_t *build_time_subscreen(lv_obj_t *screen, lv_obj_t **out_screen, const char *title, const char *subtitle,
+                                      lv_obj_t **out_subtitle_label, lv_event_cb_t back_cb)
 {
     lv_obj_t *sub = lv_obj_create(screen);
     lv_obj_remove_style_all(sub);
@@ -2082,7 +2083,7 @@ static lv_obj_t *build_time_subscreen(lv_obj_t *screen, lv_obj_t **out_screen, c
     lv_obj_t *body = lv_obj_create(sub);
     lv_obj_remove_style_all(body);
     lv_obj_remove_flag(body, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CLICK_FOCUSABLE | LV_OBJ_FLAG_PRESS_LOCK |
-                                  LV_OBJ_FLAG_GESTURE_BUBBLE | LV_OBJ_FLAG_SNAPPABLE);
+                                 LV_OBJ_FLAG_GESTURE_BUBBLE | LV_OBJ_FLAG_SNAPPABLE);
     lv_obj_set_width(body, LV_PCT(100));
     // An explicit height, not flex_grow: with flex_grow, LVGL sized this to
     // its *content* (every row added) rather than clipping to the space
@@ -2282,18 +2283,16 @@ static void wifi_password_eye_toggle_cb(lv_event_t *e)
 
 // Text mode - lowercase letters
 static const char *const s_wifi_kb_map_lc[] = {
-    "q", "w", "e", "r", "t", "y", "u", "i", "o", "p", "\n",
-    "a", "s", "d", "f", "g", "h", "j", "k", "l", "\n",
-    "ABC", "z", "x", "c", "v", "b", "n", "m", LV_SYMBOL_BACKSPACE, "\n",
-    "123", " ", "Connect", "",
+    "q",  "w",   "e", "r",       "t", "y",  "u",   "i", "o", "p", "\n", "a", "s", "d", "f",
+    "g",  "h",   "j", "k",       "l", "\n", "ABC", "z", "x", "c", "v",  "b", "n", "m", LV_SYMBOL_BACKSPACE,
+    "\n", "123", " ", "Connect", "",
 };
 
 // Text mode - uppercase letters
 static const char *const s_wifi_kb_map_uc[] = {
-    "Q", "W", "E", "R", "T", "Y", "U", "I", "O", "P", "\n",
-    "A", "S", "D", "F", "G", "H", "J", "K", "L", "\n",
-    "abc", "Z", "X", "C", "V", "B", "N", "M", LV_SYMBOL_BACKSPACE, "\n",
-    "123", " ", "Connect", "",
+    "Q",  "W",   "E", "R",       "T", "Y",  "U",   "I", "O", "P", "\n", "A", "S", "D", "F",
+    "G",  "H",   "J", "K",       "L", "\n", "abc", "Z", "X", "C", "V",  "B", "N", "M", LV_SYMBOL_BACKSPACE,
+    "\n", "123", " ", "Connect", "",
 };
 
 // Symbol mode 1: digits + common password/SSID symbols. Row 2/3 symbol
@@ -2301,18 +2300,16 @@ static const char *const s_wifi_kb_map_uc[] = {
 // (row 2: 9x1=9 units; row 3: shift(2)+5x1+backspace(2)=9 units), keeping
 // row 2 and row 3 keys visually similar width.
 static const char *const s_wifi_kb_map_sym_1[] = {
-    "1", "2", "3", "4", "5", "6", "7", "8", "9", "0", "\n",
-    "-", "_", ".", ",", ":", ";", "@", "(", ")", "\n",
-    "#+=", "'", "\"", "!", "?", "*", LV_SYMBOL_BACKSPACE, "\n",
-    "abc", " ", "Connect", "",
+    "1",  "2",   "3", "4",       "5", "6", "7",  "8",   "9", "0",  "\n", "-", "_", ".",
+    ",",  ":",   ";", "@",       "(", ")", "\n", "#+=", "'", "\"", "!",  "?", "*", LV_SYMBOL_BACKSPACE,
+    "\n", "abc", " ", "Connect", "",
 };
 
 // Symbol mode 2: remaining symbols, same row shape as mode 1.
 static const char *const s_wifi_kb_map_sym_2[] = {
-    "1", "2", "3", "4", "5", "6", "7", "8", "9", "0", "\n",
-    "/", "\\", "+", "=", "<", ">", "#", "[", "]", "\n",
-    "!?*", "{", "}", "%", "&", "$", LV_SYMBOL_BACKSPACE, "\n",
-    "abc", " ", "Connect", "",
+    "1",  "2",   "3", "4",       "5", "6", "7",  "8",   "9", "0", "\n", "/", "\\", "+",
+    "=",  "<",   ">", "#",       "[", "]", "\n", "!?*", "{", "}", "%",  "&", "$",  LV_SYMBOL_BACKSPACE,
+    "\n", "abc", " ", "Connect", "",
 };
 
 // Button widths: 1 = normal key, 2 = shift/mode-switch/backspace, 5 = space,
@@ -2321,7 +2318,7 @@ static const lv_buttonmatrix_ctrl_t s_wifi_kb_ctrl_map[] = {
     1, 1, 1, 1, 1, 1, 1, 1, 1, 1, // row 1: 10 keys
     1, 1, 1, 1, 1, 1, 1, 1, 1,    // row 2: 9 keys
     2, 1, 1, 1, 1, 1, 1, 1, 2,    // row 3: shift (2x), 7 keys (1x), backspace (2x)
-    2, 5, 3, 1,                  // row 4: mode-switch (2x), space (5x), Connect (3x), padding
+    2, 5, 3, 1,                   // row 4: mode-switch (2x), space (5x), Connect (3x), padding
 };
 
 // Symbol keyboards' row 2 is 9 keys (letters' is 9 too, but row 3 only has
@@ -2330,7 +2327,7 @@ static const lv_buttonmatrix_ctrl_t s_wifi_kb_ctrl_map_sym[] = {
     1, 1, 1, 1, 1, 1, 1, 1, 1, 1, // row 1: 10 keys
     1, 1, 1, 1, 1, 1, 1, 1, 1,    // row 2: 9 keys
     2, 1, 1, 1, 1, 1, 2,          // row 3: mode-switch (2x), 5 keys (1x), backspace (2x)
-    2, 5, 3, 1,                  // row 4: "abc" (2x), space (5x), Connect (3x), padding
+    2, 5, 3, 1,                   // row 4: "abc" (2x), space (5x), Connect (3x), padding
 };
 
 // Replaces lv_keyboard_def_event_cb() as the keyboard's LV_EVENT_VALUE_CHANGED
@@ -2455,7 +2452,8 @@ static void wifi_ap_click_cb(lv_event_t *e)
     wifi_password_screen_set_ssid(s_wifi_pending_ssid, true);
     lv_textarea_set_text(s_wifi_password_input, "");
     show_settings_view(SETTINGS_VIEW_WIFI_PASSWORD);
-    wifi_password_screen_focus_default_field(s_wifi_password_input); // SSID is fixed/known - password is the only thing left to type
+    wifi_password_screen_focus_default_field(
+        s_wifi_password_input); // SSID is fixed/known - password is the only thing left to type
 }
 
 // --- Wi-Fi row context menu (kebab button -> "Forget network") ---
@@ -2938,8 +2936,7 @@ static bool pointer_pressed_within(lv_obj_t *obj)
     lv_obj_get_coords(obj, &coords);
     for (lv_indev_t *indev = lv_indev_get_next(NULL); indev != NULL; indev = lv_indev_get_next(indev))
     {
-        if (lv_indev_get_type(indev) != LV_INDEV_TYPE_POINTER ||
-            lv_indev_get_state(indev) != LV_INDEV_STATE_PRESSED)
+        if (lv_indev_get_type(indev) != LV_INDEV_TYPE_POINTER || lv_indev_get_state(indev) != LV_INDEV_STATE_PRESSED)
         {
             continue;
         }
@@ -3064,7 +3061,7 @@ static void build_wifi_screen(lv_obj_t *screen)
     // scroll - the AP list can run longer than the screen - so only the
     // flags that don't apply to a scrollable list are stripped.
     lv_obj_remove_flag(s_wifi_list, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CLICK_FOCUSABLE | LV_OBJ_FLAG_PRESS_LOCK |
-                                         LV_OBJ_FLAG_GESTURE_BUBBLE | LV_OBJ_FLAG_SNAPPABLE);
+                                        LV_OBJ_FLAG_GESTURE_BUBBLE | LV_OBJ_FLAG_SNAPPABLE);
     lv_obj_set_width(s_wifi_list, LV_PCT(100));
     lv_obj_set_flex_grow(s_wifi_list, 1);
     lv_obj_set_flex_flow(s_wifi_list, LV_FLEX_FLOW_COLUMN);
@@ -3080,8 +3077,7 @@ static void build_wifi_screen(lv_obj_t *screen)
     s_wifi_menu_backdrop = lv_obj_create(s_wifi_screen);
     lv_obj_remove_style_all(s_wifi_menu_backdrop);
     make_plain_container(s_wifi_menu_backdrop);
-    lv_obj_add_flag(s_wifi_menu_backdrop,
-                     LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_IGNORE_LAYOUT | LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(s_wifi_menu_backdrop, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_IGNORE_LAYOUT | LV_OBJ_FLAG_HIDDEN);
     lv_obj_set_size(s_wifi_menu_backdrop, LV_PCT(100), LV_PCT(100));
     lv_obj_set_pos(s_wifi_menu_backdrop, 0, 0);
     lv_obj_set_style_bg_color(s_wifi_menu_backdrop, lv_color_black(), 0);
@@ -3259,7 +3255,8 @@ static void build_wifi_password_screen(lv_obj_t *screen)
     lv_obj_t *eye_icon = lv_label_create(eye_btn);
     lv_obj_set_style_text_color(eye_icon, COLOR_MUTED, 0);
     lv_obj_set_style_text_font(eye_icon, &lv_font_montserrat_18, 0);
-    lv_label_set_text(eye_icon, LV_SYMBOL_EYE_CLOSE); // starts masked, matches lv_textarea_set_password_mode(true) above
+    lv_label_set_text(eye_icon,
+                      LV_SYMBOL_EYE_CLOSE); // starts masked, matches lv_textarea_set_password_mode(true) above
 
     // Connecting/error status - replaces a static hint, only shown once a
     // connect attempt is under way (see wifi_password_connect_cb()/
@@ -3277,8 +3274,7 @@ static void build_wifi_password_screen(lv_obj_t *screen)
     style_dark_keyboard(s_wifi_password_keyboard);
     // Default height is 50% of parent (LV_PCT(50), see lv_keyboard_class in
     // LVGL); shrink 50px shorter than that to leave more room above it.
-    lv_obj_set_height(s_wifi_password_keyboard,
-                       (BOARD_JC4880P443C_LCD_V_RES - STATUSBAR_HEIGHT_PX) / 2 - 50);
+    lv_obj_set_height(s_wifi_password_keyboard, (BOARD_JC4880P443C_LCD_V_RES - STATUSBAR_HEIGHT_PX) / 2 - 50);
 
     // Only the initially-visible mode (TEXT_LOWER, keyboard->mode's default
     // after lv_keyboard_create()) needs a real button matrix at build time.
@@ -3364,7 +3360,7 @@ static void watchlist_drag_pressed_cb(lv_event_t *e)
     s_watchlist_drag.baseline_y = point.y;
 
     lv_obj_remove_flag(s_watchlist_list,
-                        LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_SCROLL_CHAIN | LV_OBJ_FLAG_SCROLL_MOMENTUM);
+                       LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_SCROLL_CHAIN | LV_OBJ_FLAG_SCROLL_MOMENTUM);
 }
 
 // Fires continuously while the handle is held and the finger moves.
@@ -3672,7 +3668,7 @@ static void build_watchlist_manage_screen(lv_obj_t *screen)
     // symbol" pill can run longer than the screen) - same flag treatment as
     // s_wifi_list, see its comment.
     lv_obj_remove_flag(s_watchlist_list, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_CLICK_FOCUSABLE | LV_OBJ_FLAG_PRESS_LOCK |
-                                              LV_OBJ_FLAG_GESTURE_BUBBLE | LV_OBJ_FLAG_SNAPPABLE);
+                                             LV_OBJ_FLAG_GESTURE_BUBBLE | LV_OBJ_FLAG_SNAPPABLE);
     lv_obj_set_width(s_watchlist_list, LV_PCT(100));
     lv_obj_set_flex_grow(s_watchlist_list, 1);
     lv_obj_set_flex_flow(s_watchlist_list, LV_FLEX_FLOW_COLUMN);
@@ -3702,45 +3698,41 @@ static void build_watchlist_manage_screen(lv_obj_t *screen)
 #define WATCHLIST_KB_MODE_SYM_2 LV_KEYBOARD_MODE_USER_4
 
 static const char *const s_watchlist_kb_map_lc[] = {
-    "q", "w", "e", "r", "t", "y", "u", "i", "o", "p", "\n",
-    "a", "s", "d", "f", "g", "h", "j", "k", "l", "\n",
-    "ABC", "z", "x", "c", "v", "b", "n", "m", LV_SYMBOL_BACKSPACE, "\n",
-    "123", " ", "Search", "",
+    "q",  "w",   "e", "r",      "t", "y",  "u",   "i", "o", "p", "\n", "a", "s", "d", "f",
+    "g",  "h",   "j", "k",      "l", "\n", "ABC", "z", "x", "c", "v",  "b", "n", "m", LV_SYMBOL_BACKSPACE,
+    "\n", "123", " ", "Search", "",
 };
 
 static const char *const s_watchlist_kb_map_uc[] = {
-    "Q", "W", "E", "R", "T", "Y", "U", "I", "O", "P", "\n",
-    "A", "S", "D", "F", "G", "H", "J", "K", "L", "\n",
-    "abc", "Z", "X", "C", "V", "B", "N", "M", LV_SYMBOL_BACKSPACE, "\n",
-    "123", " ", "Search", "",
+    "Q",  "W",   "E", "R",      "T", "Y",  "U",   "I", "O", "P", "\n", "A", "S", "D", "F",
+    "G",  "H",   "J", "K",      "L", "\n", "abc", "Z", "X", "C", "V",  "B", "N", "M", LV_SYMBOL_BACKSPACE,
+    "\n", "123", " ", "Search", "",
 };
 
 static const char *const s_watchlist_kb_map_sym_1[] = {
-    "1", "2", "3", "4", "5", "6", "7", "8", "9", "0", "\n",
-    "-", "_", ".", ",", ":", ";", "@", "(", ")", "\n",
-    "#+=", "'", "\"", "!", "?", "*", LV_SYMBOL_BACKSPACE, "\n",
-    "abc", " ", "Search", "",
+    "1",  "2",   "3", "4",      "5", "6", "7",  "8",   "9", "0",  "\n", "-", "_", ".",
+    ",",  ":",   ";", "@",      "(", ")", "\n", "#+=", "'", "\"", "!",  "?", "*", LV_SYMBOL_BACKSPACE,
+    "\n", "abc", " ", "Search", "",
 };
 
 static const char *const s_watchlist_kb_map_sym_2[] = {
-    "1", "2", "3", "4", "5", "6", "7", "8", "9", "0", "\n",
-    "/", "\\", "+", "=", "<", ">", "#", "[", "]", "\n",
-    "!?*", "{", "}", "%", "&", "$", LV_SYMBOL_BACKSPACE, "\n",
-    "abc", " ", "Search", "",
+    "1",  "2",   "3", "4",      "5", "6", "7",  "8",   "9", "0", "\n", "/", "\\", "+",
+    "=",  "<",   ">", "#",      "[", "]", "\n", "!?*", "{", "}", "%",  "&", "$",  LV_SYMBOL_BACKSPACE,
+    "\n", "abc", " ", "Search", "",
 };
 
 static const lv_buttonmatrix_ctrl_t s_watchlist_kb_ctrl_map[] = {
     1, 1, 1, 1, 1, 1, 1, 1, 1, 1, // row 1: 10 keys
     1, 1, 1, 1, 1, 1, 1, 1, 1,    // row 2: 9 keys
     2, 1, 1, 1, 1, 1, 1, 1, 2,    // row 3: shift (2x), 7 keys (1x), backspace (2x)
-    2, 5, 3, 1,                  // row 4: mode-switch (2x), space (5x), Check symbol (3x), padding
+    2, 5, 3, 1,                   // row 4: mode-switch (2x), space (5x), Check symbol (3x), padding
 };
 
 static const lv_buttonmatrix_ctrl_t s_watchlist_kb_ctrl_map_sym[] = {
     1, 1, 1, 1, 1, 1, 1, 1, 1, 1, // row 1: 10 keys
     1, 1, 1, 1, 1, 1, 1, 1, 1,    // row 2: 9 keys
     2, 1, 1, 1, 1, 1, 2,          // row 3: mode-switch (2x), 5 keys (1x), backspace (2x)
-    2, 5, 3, 1,                  // row 4: "abc" (2x), space (5x), Check symbol (3x), padding
+    2, 5, 3, 1,                   // row 4: "abc" (2x), space (5x), Check symbol (3x), padding
 };
 
 static void watchlist_add_check_cb(lv_event_t *e); // defined below, referenced by the keyboard event cb
@@ -3920,7 +3912,7 @@ static void watchlist_add_check_cb(lv_event_t *e)
 
         lv_label_set_text(s_watchlist_match_last_price_label, price_buf);
         lv_obj_set_style_text_color(s_watchlist_match_change_label,
-                                     ticker.price_change_percent >= 0.0 ? COLOR_UP : COLOR_DOWN, 0);
+                                    ticker.price_change_percent >= 0.0 ? COLOR_UP : COLOR_DOWN, 0);
         lv_label_set_text(s_watchlist_match_change_label, change_buf);
         lv_label_set_text(s_watchlist_match_range_label, range_buf);
 
@@ -3934,9 +3926,8 @@ static void watchlist_add_check_cb(lv_event_t *e)
         lv_obj_add_flag(s_watchlist_match_card, LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(s_watchlist_add_button, LV_OBJ_FLAG_HIDDEN);
 
-        const char *msg = (err == MARKET_DATA_ERR_SYMBOL_NOT_FOUND)
-                               ? "isn't a Binance spot pair. Check the spelling."
-                               : "Couldn't reach Binance. Try again.";
+        const char *msg = (err == MARKET_DATA_ERR_SYMBOL_NOT_FOUND) ? "isn't a Binance spot pair. Check the spelling."
+                                                                    : "Couldn't reach Binance. Try again.";
         lv_label_set_text_fmt(s_watchlist_error_label, "%s %s", symbol, msg);
         lv_obj_remove_flag(s_watchlist_error_note, LV_OBJ_FLAG_HIDDEN);
     }
@@ -4029,7 +4020,8 @@ static void build_watchlist_add_screen(lv_obj_t *screen)
     lv_obj_set_size(s_watchlist_add_screen, LV_PCT(100), BOARD_JC4880P443C_LCD_V_RES - STATUSBAR_HEIGHT_PX);
     lv_obj_set_flex_flow(s_watchlist_add_screen, LV_FLEX_FLOW_COLUMN);
 
-    s_watchlist_add_subtitle = build_subscreen_header(s_watchlist_add_screen, "Add symbol", "--", watchlist_add_back_cb);
+    s_watchlist_add_subtitle =
+        build_subscreen_header(s_watchlist_add_screen, "Add symbol", "--", watchlist_add_back_cb);
 
     const int32_t field_row_width_px = (int32_t)(BOARD_JC4880P443C_LCD_H_RES * 9 / 10) + 20;
     const int32_t field_vpad_px = (WIFI_PASSWORD_FIELD_HEIGHT_PX - lv_font_get_line_height(&lv_font_montserrat_16)) / 2;
@@ -4257,9 +4249,8 @@ static void updates_screen_reset(void)
     lv_obj_add_flag(s_updates_progress_row, LV_OBJ_FLAG_HIDDEN);
     lv_obj_remove_flag(s_updates_action_button, LV_OBJ_FLAG_HIDDEN);
     lv_obj_clear_state(s_updates_action_button, LV_STATE_DISABLED);
-    lv_label_set_text(s_updates_action_label,
-                       info.update_available ? LV_SYMBOL_DOWNLOAD " Install update" : LV_SYMBOL_REFRESH
-                                                                                       " Check for updates");
+    lv_label_set_text(s_updates_action_label, info.update_available ? LV_SYMBOL_DOWNLOAD " Install update"
+                                                                    : LV_SYMBOL_REFRESH " Check for updates");
 }
 
 static void updates_row_click_cb(lv_event_t *e)
@@ -4557,11 +4548,10 @@ static void build_about_screen(lv_obj_t *screen)
     lv_obj_set_style_text_font(disclaimer_label, &lv_font_montserrat_12, 0);
     lv_obj_set_width(disclaimer_label, LV_PCT(100));
     lv_label_set_long_mode(disclaimer_label, LV_LABEL_LONG_WRAP);
-    lv_label_set_text(disclaimer_label,
-                       "Market data is provided by Binance and may be delayed, incomplete, or "
-                       "inaccurate. Nothing shown here is financial, investment, or trading "
-                       "advice - always verify prices on the official exchange. The software "
-                       "is provided \"as is\", without warranty of any kind.");
+    lv_label_set_text(disclaimer_label, "Market data is provided by Binance and may be delayed, incomplete, or "
+                                        "inaccurate. Nothing shown here is financial, investment, or trading "
+                                        "advice - always verify prices on the official exchange. The software "
+                                        "is provided \"as is\", without warranty of any kind.");
 }
 
 static void locale_row_click_cb(lv_event_t *e)
@@ -4615,8 +4605,7 @@ static void build_settings_list(lv_obj_t *screen)
     lv_obj_set_style_text_font(header_title, &lv_font_montserrat_18, 0);
     lv_label_set_text(header_title, "Settings");
 
-    s_settings_wifi_row_desc =
-        build_settings_row(s_settings_list, LV_SYMBOL_WIFI, "Wi-Fi", "--", wifi_row_click_cb);
+    s_settings_wifi_row_desc = build_settings_row(s_settings_list, LV_SYMBOL_WIFI, "Wi-Fi", "--", wifi_row_click_cb);
     // LVGL's built-in symbol set has no clock/calendar glyph - the gear is
     // the closest available placeholder, not a dedicated "time" icon.
     s_settings_locale_row_desc =
@@ -4645,18 +4634,9 @@ typedef struct
 } date_format_option_t;
 
 static const date_format_option_t s_date_formats[] = {
-    { "DDD DD MMM", "%a %d %b" },
-    { "DD MMM YYYY", "%d %b %Y" },
-    { "MMM DD, YYYY", "%b %d, %Y" },
-    { "DD/MM/YYYY", "%d/%m/%Y" },
-    { "MM/DD/YYYY", "%m/%d/%Y" },
-    { "YYYY/MM/DD", "%Y/%m/%d" },
-    { "YYYY-MM-DD", "%Y-%m-%d" },
-    { "DD-MM-YYYY", "%d-%m-%Y" },
-    { "MM-DD-YYYY", "%m-%d-%Y" },
-    { "DD.MM.YYYY", "%d.%m.%Y" },
-    { "MM.DD.YYYY", "%m.%d.%Y" },
-    { "YYYY.MM.DD", "%Y.%m.%d" },
+    {"DDD DD MMM", "%a %d %b"}, {"DD MMM YYYY", "%d %b %Y"}, {"MMM DD, YYYY", "%b %d, %Y"}, {"DD/MM/YYYY", "%d/%m/%Y"},
+    {"MM/DD/YYYY", "%m/%d/%Y"}, {"YYYY/MM/DD", "%Y/%m/%d"},  {"YYYY-MM-DD", "%Y-%m-%d"},    {"DD-MM-YYYY", "%d-%m-%Y"},
+    {"MM-DD-YYYY", "%m-%d-%Y"}, {"DD.MM.YYYY", "%d.%m.%Y"},  {"MM.DD.YYYY", "%m.%d.%Y"},    {"YYYY.MM.DD", "%Y.%m.%d"},
 };
 #define DATE_FORMAT_COUNT (sizeof(s_date_formats) / sizeof(s_date_formats[0]))
 
@@ -4686,7 +4666,8 @@ static void destroy_date_format_view(void)
 // POSIX string directly, since most cities within a region share one DST
 // rule (e.g. every CET/CEST city in Europe).
 
-typedef enum {
+typedef enum
+{
     TZ_ZONE_AMERICA,
     TZ_ZONE_ASIA,
     TZ_ZONE_ATLANTIC,
@@ -4699,17 +4680,13 @@ typedef enum {
 } tz_zone_id_t;
 
 static const char *const s_tz_zone_names[TZ_ZONE_COUNT] = {
-    [TZ_ZONE_AMERICA] = "America",
-    [TZ_ZONE_ASIA] = "Asia",
-    [TZ_ZONE_ATLANTIC] = "Atlantic",
-    [TZ_ZONE_AUSTRALIA] = "Australia",
-    [TZ_ZONE_AFRICA] = "Africa",
-    [TZ_ZONE_EUROPE] = "Europe",
-    [TZ_ZONE_INDIAN] = "Indian",
-    [TZ_ZONE_PACIFIC] = "Pacific",
+    [TZ_ZONE_AMERICA] = "America",     [TZ_ZONE_ASIA] = "Asia",       [TZ_ZONE_ATLANTIC] = "Atlantic",
+    [TZ_ZONE_AUSTRALIA] = "Australia", [TZ_ZONE_AFRICA] = "Africa",   [TZ_ZONE_EUROPE] = "Europe",
+    [TZ_ZONE_INDIAN] = "Indian",       [TZ_ZONE_PACIFIC] = "Pacific",
 };
 
-typedef enum {
+typedef enum
+{
     TZ_P_UTC0,
     TZ_P_GMT_BST,
     TZ_P_WET_WEST,
@@ -4893,7 +4870,8 @@ static const char *const s_tz_posix_strings[] = {
     [TZ_P_SST] = "SST11",
 };
 
-typedef enum {
+typedef enum
+{
     TZ_C_ACC_RA,
     TZ_C_ADDIS_ABABA,
     TZ_C_ADELAIDE,
@@ -5206,7 +5184,7 @@ typedef struct
     tz_posix_id_t posix;
 } tz_entry_t;
 
-#define TZROW(zone, city, posix) { zone, city, posix }
+#define TZROW(zone, city, posix) {zone, city, posix}
 
 // Not const: sorted in place, once, the first time build_time_zone_screen()
 // runs (see its qsort() call) so region/city lists read alphabetically
@@ -5453,7 +5431,7 @@ static void time_zone_city_back_cb(lv_event_t *e)
 // by the two fixed-length lists (Time format, Date format). out_check lets
 // the caller keep a handle to toggle it later.
 static lv_obj_t *build_time_toggle_row(lv_obj_t *parent, const char *title, lv_event_cb_t click_cb, void *user_data,
-                                        lv_obj_t **out_check)
+                                       lv_obj_t **out_check)
 {
     lv_obj_t *row = build_selectable_row(parent, title, false, click_cb, user_data);
     lv_obj_t *check = lv_label_create(row);
@@ -5495,9 +5473,8 @@ static void build_time_format_screen(lv_obj_t *screen)
         build_time_subscreen(screen, &s_time_format_screen, "Time format", NULL, NULL, time_format_back_cb);
 
     build_time_toggle_row(body, "12-hour", time_format_row_click_cb, (void *)(uintptr_t)false,
-                           &s_time_format_check_12h);
-    build_time_toggle_row(body, "24-hour", time_format_row_click_cb, (void *)(uintptr_t)true,
-                           &s_time_format_check_24h);
+                          &s_time_format_check_12h);
+    build_time_toggle_row(body, "24-hour", time_format_row_click_cb, (void *)(uintptr_t)true, &s_time_format_check_24h);
 
     time_format_refresh_marks();
 }
@@ -5530,7 +5507,7 @@ static void build_date_format_screen(lv_obj_t *screen)
     for (size_t i = 0; i < DATE_FORMAT_COUNT; i++)
     {
         build_time_toggle_row(body, s_date_formats[i].mask, date_format_row_click_cb, (void *)(uintptr_t)i,
-                               &s_date_format_checks[i]);
+                              &s_date_format_checks[i]);
     }
 
     for (size_t i = 0; i < DATE_FORMAT_COUNT; i++)
@@ -5544,8 +5521,9 @@ static void build_date_format_screen(lv_obj_t *screen)
 }
 
 static void time_zone_city_row_click_cb(lv_event_t *e); // defined below, used by show_time_zone_cities()
-static void apply_region_change(settings_api_region_t region,
-                                 settings_api_region_source_t source); // defined below, used by time_zone_city_row_click_cb
+static void
+apply_region_change(settings_api_region_t region,
+                    settings_api_region_source_t source); // defined below, used by time_zone_city_row_click_cb
 
 // Rebuilds the city list for one region from scratch - cheap enough to redo
 // on every tap (at most a few dozen rows) and far simpler than moving a
@@ -5575,8 +5553,7 @@ static void show_time_zone_cities(tz_zone_id_t zone)
         // rule (e.g. every CET/CEST city in Europe), which previously made
         // every one of them light up as "current" at once.
         bool is_current = strcmp(title_buf, s_locale.tz_label) == 0;
-        build_selectable_row(s_time_zone_city_list, title_buf, is_current, time_zone_city_row_click_cb,
-                              (void *)entry);
+        build_selectable_row(s_time_zone_city_list, title_buf, is_current, time_zone_city_row_click_cb, (void *)entry);
     }
 }
 
@@ -5642,7 +5619,7 @@ static void build_time_zone_screen(lv_obj_t *screen)
 static void build_time_zone_city_screen(lv_obj_t *screen)
 {
     s_time_zone_city_list = build_time_subscreen(screen, &s_time_zone_city_screen, "Time zones", "",
-                                                  &s_time_zone_city_subtitle, time_zone_city_back_cb);
+                                                 &s_time_zone_city_subtitle, time_zone_city_back_cb);
 }
 
 static void time_format_nav_row_click_cb(lv_event_t *e)
@@ -5735,8 +5712,8 @@ static void region_refresh_marks(void)
     // "Automatic" alone doesn't say which host that currently resolves to -
     // spell it out, since that's exactly the detail Phase 13 exists to get
     // right silently in the background.
-    const char *resolved = (cfg.region == SETTINGS_API_REGION_US) ? "United States (Binance.US)"
-                                                                    : "International (Binance.com)";
+    const char *resolved =
+        (cfg.region == SETTINGS_API_REGION_US) ? "United States (Binance.US)" : "International (Binance.com)";
     lv_label_set_text_fmt(s_region_subtitle, "Currently: %s", resolved);
 }
 
@@ -5767,14 +5744,13 @@ static void region_nav_row_click_cb(lv_event_t *e)
 
 static void build_region_screen(lv_obj_t *screen)
 {
-    lv_obj_t *body =
-        build_time_subscreen(screen, &s_region_screen, "Region", "", &s_region_subtitle, region_back_cb);
+    lv_obj_t *body = build_time_subscreen(screen, &s_region_screen, "Region", "", &s_region_subtitle, region_back_cb);
 
     build_time_toggle_row(body, "Automatic", region_row_click_cb, (void *)(uintptr_t)0, &s_region_check_auto);
     build_time_toggle_row(body, "International (Binance.com)", region_row_click_cb, (void *)(uintptr_t)1,
-                           &s_region_check_intl);
+                          &s_region_check_intl);
     build_time_toggle_row(body, "United States (Binance.US)", region_row_click_cb, (void *)(uintptr_t)2,
-                           &s_region_check_us);
+                          &s_region_check_us);
 
     region_refresh_marks();
 }
@@ -5806,9 +5782,8 @@ static const char *s_night_time_minute_options = "00\n05\n10\n15\n20\n25\n30\n35
 static void display_refresh_night_time_values(void)
 {
     lv_label_set_text_fmt(s_display_night_start_value, "%02u:%02u", s_display.night_start_hour,
-                           s_display.night_start_minute);
-    lv_label_set_text_fmt(s_display_night_end_value, "%02u:%02u", s_display.night_end_hour,
-                           s_display.night_end_minute);
+                          s_display.night_start_minute);
+    lv_label_set_text_fmt(s_display_night_end_value, "%02u:%02u", s_display.night_end_hour, s_display.night_end_minute);
 }
 
 // Clears the dangling static widget handles once the msgbox is actually
@@ -6093,7 +6068,7 @@ static void build_disclaimer_screen(void)
     lv_obj_set_width(intro, LV_PCT(100));
     lv_label_set_long_mode(intro, LV_LABEL_LONG_WRAP);
     lv_label_set_text(intro, "This is a free, open-source project provided for informational and "
-                              "educational purposes only.");
+                             "educational purposes only.");
 
     static const char *const s_disclaimer_bullets[] = {
         "Market data is provided by Binance and may be delayed, incomplete, or inaccurate.",
@@ -6146,10 +6121,7 @@ static void build_disclaimer_screen(void)
     lv_label_set_text(accept_label, "Accept");
 }
 
-static void show_disclaimer_screen(void)
-{
-    lv_screen_load(s_disclaimer_screen);
-}
+static void show_disclaimer_screen(void) { lv_screen_load(s_disclaimer_screen); }
 
 // lv_textarea (via its cursor-blink lv_anim_t - see start_cursor_blink() in
 // LVGL's lv_textarea.c), and possibly other widget classes never touched by
@@ -6210,8 +6182,7 @@ static void display_ui_render(void)
     warm_up_lvgl_widget_classes(screen);
     build_settings_list(screen);
     build_statusbar(screen);
-    ESP_LOGI(TAG, "display_ui_render: dashboard ready in %lld ms",
-             (esp_timer_get_time() - __render_t0) / 1000);
+    ESP_LOGI(TAG, "display_ui_render: dashboard ready in %lld ms", (esp_timer_get_time() - __render_t0) / 1000);
 
     // Every Settings sub-screen (Wi-Fi, Time, Display, Watchlist manage/add,
     // Updates, About - 13 in all) is built lazily on first navigation into
@@ -6343,7 +6314,7 @@ static int cmd_nav(int argc, char **argv)
     {
         set_active_screen(DISPLAY_UI_SCREEN_SETTINGS);
         wifi_manager_pause_autoconnect(); // matches wifi_row_click_cb()
-        wifi_manager_scan_async(); // matches wifi_row_click_cb(), populates the list instead of "Scanning..."
+        wifi_manager_scan_async();        // matches wifi_row_click_cb(), populates the list instead of "Scanning..."
         show_settings_view(SETTINGS_VIEW_WIFI);
     }
     else if (strcmp(target, "wifi_password") == 0)
@@ -6496,8 +6467,8 @@ static int cmd_memlog(int argc, char **argv)
            "settings_view=%d wifi_rows=%u resident_subscreens=%d\n",
            (unsigned)s.lvgl.used_pct, (unsigned)s.lvgl.free_size, (unsigned)s.lvgl.free_biggest_size,
            (unsigned)s.lvgl.frag_pct, (unsigned)s.internal_free, (unsigned)s.internal_largest,
-           (unsigned)s.internal_min_free, (unsigned)s.psram_free, (unsigned)s.psram_largest,
-           (unsigned)s.psram_min_free, s.settings_view, s.wifi_rows, s.resident_subscreens);
+           (unsigned)s.internal_min_free, (unsigned)s.psram_free, (unsigned)s.psram_largest, (unsigned)s.psram_min_free,
+           s.settings_view, s.wifi_rows, s.resident_subscreens);
     return 0;
 }
 
@@ -6527,9 +6498,6 @@ esp_err_t display_ui_register_dev_nav_console(void)
 
 #else // !CONFIG_DEV_SCREENSHOT_CONSOLE
 
-esp_err_t display_ui_register_dev_nav_console(void)
-{
-    return ESP_OK;
-}
+esp_err_t display_ui_register_dev_nav_console(void) { return ESP_OK; }
 
 #endif

@@ -28,10 +28,7 @@ static int64_t s_next_attempt_ms[APP_STATE_MAX_SYMBOLS];
 static int64_t s_disconnected_since_ms; // 0 => not currently in a disconnected span
 static bool s_force_resync_all;
 
-static int64_t now_ms(void)
-{
-    return esp_timer_get_time() / 1000;
-}
+static int64_t now_ms(void) { return esp_timer_get_time() / 1000; }
 
 static void handle_wifi_event(const wifi_manager_event_t *evt)
 {
@@ -142,8 +139,8 @@ static void run_due_fetches(uint8_t count, market_data_kline_t *const *scratch)
     }
 
     market_data_batch_result_t results[APP_STATE_MAX_SYMBOLS];
-    market_data_err_t err = market_data_client_fetch_klines_24h_5m_batch(symbols, due_count, out_klines,
-                                                                          APP_STATE_KLINE_CAPACITY, results);
+    market_data_err_t err =
+        market_data_client_fetch_klines_24h_5m_batch(symbols, due_count, out_klines, APP_STATE_KLINE_CAPACITY, results);
     if (err != MARKET_DATA_OK)
     {
         // NOT_SYNCED (race with the check above) or bad args - nothing to
@@ -185,11 +182,11 @@ static void run_due_fetches(uint8_t count, market_data_kline_t *const *scratch)
             app_state_get_symbol_meta(idx, &meta);
             if (recoverable)
             {
-                uint32_t delay = app_state_retry_backoff_delay_ms(RETRY_BASE_DELAY_MS, RETRY_MAX_DELAY_MS,
-                                                                    meta.retry_attempt);
+                uint32_t delay =
+                    app_state_retry_backoff_delay_ms(RETRY_BASE_DELAY_MS, RETRY_MAX_DELAY_MS, meta.retry_attempt);
                 s_next_attempt_ms[idx] = now_ms() + delay;
                 ESP_LOGW(TAG, "'%s' fetch failed (err=%d), retrying in %u ms", symbols[i], (int)results[i].err,
-                          (unsigned)delay);
+                         (unsigned)delay);
             }
             else if (results[i].err == MARKET_DATA_ERR_SYMBOL_NOT_FOUND)
             {
@@ -201,7 +198,7 @@ static void run_due_fetches(uint8_t count, market_data_kline_t *const *scratch)
             else
             {
                 ESP_LOGE(TAG, "'%s' fetch failed with unrecoverable err=%d; not retrying automatically", symbols[i],
-                          (int)results[i].err);
+                         (int)results[i].err);
             }
         }
     }
@@ -264,7 +261,4 @@ esp_err_t app_state_sync_task_start(void)
     return (ok == pdPASS) ? ESP_OK : ESP_ERR_NO_MEM;
 }
 
-void app_state_sync_task_force_resync(void)
-{
-    s_force_resync_all = true;
-}
+void app_state_sync_task_force_resync(void) { s_force_resync_all = true; }

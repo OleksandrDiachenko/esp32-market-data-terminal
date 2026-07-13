@@ -12,21 +12,22 @@
 #include "settings_codec.h" // SETTINGS_SYMBOL_MAX_LEN
 
 #ifdef __cplusplus
-extern "C" {
+extern "C"
+{
 #endif
 
-typedef struct
-{
-    char symbol[SETTINGS_SYMBOL_MAX_LEN + 1]; // data.s, e.g. "BTCUSDT"
-    int64_t open_time_ms;                     // k.t - start of this 1s kline
-    double open;                              // k.o
-    double high;                              // k.h
-    double low;                               // k.l
-    double close;                             // k.c
-    double volume;                            // k.v (base asset volume)
-    uint32_t number_of_trades;                // k.n
-    bool is_final;                            // k.x - true once this 1s kline has closed
-} market_data_kline_update_t;
+    typedef struct
+    {
+        char symbol[SETTINGS_SYMBOL_MAX_LEN + 1]; // data.s, e.g. "BTCUSDT"
+        int64_t open_time_ms;                     // k.t - start of this 1s kline
+        double open;                              // k.o
+        double high;                              // k.h
+        double low;                               // k.l
+        double close;                             // k.c
+        double volume;                            // k.v (base asset volume)
+        uint32_t number_of_trades;                // k.n
+        bool is_final;                            // k.x - true once this 1s kline has closed
+    } market_data_kline_update_t;
 
 #ifdef __cplusplus
 }

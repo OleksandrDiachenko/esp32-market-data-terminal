@@ -10,11 +10,12 @@
 #include "esp_err.h"
 
 #ifdef __cplusplus
-extern "C" {
+extern "C"
+{
 #endif
 
-// Call once, after dev_console_start() (needs the same console REPL).
-esp_err_t dev_screenshot_console_register(void);
+    // Call once, after dev_console_start() (needs the same console REPL).
+    esp_err_t dev_screenshot_console_register(void);
 
 #ifdef __cplusplus
 }

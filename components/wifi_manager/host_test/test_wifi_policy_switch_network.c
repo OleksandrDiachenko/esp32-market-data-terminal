@@ -29,8 +29,7 @@ static void connect_new_and_succeed(wifi_policy_t *p, const char *ssid)
     wifi_policy_handle(p, &success, actions, WIFI_POLICY_MAX_ACTIONS);
 }
 
-static bool has_action(const wifi_policy_action_t *actions, uint8_t n, wifi_policy_action_kind_t kind,
-                        const char *ssid)
+static bool has_action(const wifi_policy_action_t *actions, uint8_t n, wifi_policy_action_kind_t kind, const char *ssid)
 {
     for (uint8_t i = 0; i < n; i++)
     {

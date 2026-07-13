@@ -83,8 +83,8 @@ static bool append_lower(char *out, size_t out_capacity, size_t *len, const char
 }
 
 market_data_err_t market_data_ws_url_build_combined_stream(const char *base_ws_url, const char *const *symbols,
-                                                            uint8_t symbol_count, const char *stream_suffix,
-                                                            char *out, size_t out_capacity)
+                                                           uint8_t symbol_count, const char *stream_suffix, char *out,
+                                                           size_t out_capacity)
 {
     if (base_ws_url == NULL || symbols == NULL || symbol_count == 0 || stream_suffix == NULL || out == NULL ||
         out_capacity == 0)

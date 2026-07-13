@@ -45,7 +45,7 @@ static int cmd_screenshot(int argc, char **argv)
     // with heap_caps_free(), never lv_draw_buf_destroy().
     lv_draw_buf_t draw_buf;
     lv_draw_buf_init(&draw_buf, BOARD_JC4880P443C_LCD_H_RES, BOARD_JC4880P443C_LCD_V_RES, LV_COLOR_FORMAT_RGB565,
-                      stride, psram_buf, buf_size);
+                     stride, psram_buf, buf_size);
 
     // lv_screen_active() is the one root screen; every sub-panel
     // (Watchlist/Settings/Wi-Fi/etc. in display_ui.c) is a child of it,
@@ -123,9 +123,6 @@ esp_err_t dev_screenshot_console_register(void)
 
 #else // !CONFIG_DEV_SCREENSHOT_CONSOLE
 
-esp_err_t dev_screenshot_console_register(void)
-{
-    return ESP_OK;
-}
+esp_err_t dev_screenshot_console_register(void) { return ESP_OK; }
 
 #endif

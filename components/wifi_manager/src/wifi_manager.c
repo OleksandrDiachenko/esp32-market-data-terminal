@@ -125,10 +125,7 @@ static void start_connect_timeout_timer(void)
     esp_timer_start_once(connect_timeout_timer, (uint64_t)CONNECT_TIMEOUT_MS * 1000ULL);
 }
 
-static void stop_connect_timeout_timer(void)
-{
-    esp_timer_stop(connect_timeout_timer);
-}
+static void stop_connect_timeout_timer(void) { esp_timer_stop(connect_timeout_timer); }
 
 static void start_retry_timer(uint32_t delay_ms)
 {
@@ -136,10 +133,7 @@ static void start_retry_timer(uint32_t delay_ms)
     esp_timer_start_once(retry_timer, (uint64_t)delay_ms * 1000ULL);
 }
 
-static void stop_retry_timer(void)
-{
-    esp_timer_stop(retry_timer);
-}
+static void stop_retry_timer(void) { esp_timer_stop(retry_timer); }
 
 static void start_scan_timeout_timer(void)
 {
@@ -147,14 +141,11 @@ static void start_scan_timeout_timer(void)
     esp_timer_start_once(scan_timeout_timer, (uint64_t)SCAN_TIMEOUT_MS * 1000ULL);
 }
 
-static void stop_scan_timeout_timer(void)
-{
-    esp_timer_stop(scan_timeout_timer);
-}
+static void stop_scan_timeout_timer(void) { esp_timer_stop(scan_timeout_timer); }
 
 static size_t hosted_sdio_mempool_required_bytes(void)
 {
-#if defined(CONFIG_ESP_HOSTED_SDIO_HOST_INTERFACE) && defined(CONFIG_ESP_HOSTED_USE_MEMPOOL) && \
+#if defined(CONFIG_ESP_HOSTED_SDIO_HOST_INTERFACE) && defined(CONFIG_ESP_HOSTED_USE_MEMPOOL) &&                        \
     CONFIG_ESP_HOSTED_USE_MEMPOOL
     return ((size_t)CONFIG_ESP_HOSTED_SDIO_RX_Q_SIZE + HOSTED_SDIO_MIN_MEMPOOL_BLOCKS) *
            (HOSTED_SDIO_BUFFER_SIZE + HOSTED_SDIO_BLOCK_OVERHEAD);
@@ -623,8 +614,8 @@ static void handle_scan_done(void)
         profiles[i].blocked = (profile_db.records[i].flags & WIFI_PROFILE_FLAG_BLOCKED) != 0;
     }
 
-    uint8_t sorted_count = wifi_policy_sort_scan(scan_policy_aps, (uint8_t)fetched, WIFI_MANAGER_MAX_SCAN_APS,
-                                                  profiles, profile_db.count, policy.current_ssid);
+    uint8_t sorted_count = wifi_policy_sort_scan(scan_policy_aps, (uint8_t)fetched, WIFI_MANAGER_MAX_SCAN_APS, profiles,
+                                                 profile_db.count, policy.current_ssid);
 
     if (snapshot_mutex != NULL && xSemaphoreTake(snapshot_mutex, portMAX_DELAY) == pdTRUE)
     {
@@ -805,7 +796,7 @@ static void handle_cmd(const wifi_mgr_cmd_t *cmd)
         {
             stop_connect_timeout_timer();
             wifi_policy_input_t in = {.kind = WIFI_POLICY_IN_CONNECT_FAIL,
-                                       .fail_class = wifi_policy_classify_reason(cmd->disconnect_reason)};
+                                      .fail_class = wifi_policy_classify_reason(cmd->disconnect_reason)};
             feed_policy(&in);
         }
         else if (pstate == WIFI_POLICY_STATE_CONNECTED)
@@ -1059,7 +1050,7 @@ esp_err_t wifi_manager_init(void)
     snapshot.available = false;
 
     if (xTaskCreate(wifi_mgr_task, "wifi_mgr", WIFI_MGR_TASK_STACK_SIZE, NULL, WIFI_MGR_TASK_PRIORITY,
-                     &wifi_mgr_task_handle) != pdPASS)
+                    &wifi_mgr_task_handle) != pdPASS)
     {
         return ESP_ERR_NO_MEM;
     }
@@ -1281,7 +1272,4 @@ esp_err_t wifi_manager_get_snapshot(wifi_manager_snapshot_t *out_snapshot)
     return ESP_OK;
 }
 
-QueueHandle_t wifi_manager_get_event_queue(void)
-{
-    return event_queue;
-}
+QueueHandle_t wifi_manager_get_event_queue(void) { return event_queue; }

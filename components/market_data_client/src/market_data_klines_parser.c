@@ -4,7 +4,7 @@
 #include <string.h>
 
 void market_data_klines_parser_init(market_data_klines_parser_t *p, market_data_kline_t *out_klines,
-                                     uint16_t out_capacity)
+                                    uint16_t out_capacity)
 {
     memset(p, 0, sizeof(*p));
     market_data_json_scanner_init(&p->scanner);
@@ -22,7 +22,7 @@ void market_data_klines_parser_init(market_data_klines_parser_t *p, market_data_
 //   9 takerBuyBaseVolume (string)   10 takerBuyQuoteVolume (string)
 //   11 ignore (unused)
 static market_data_err_t handle_field_value(market_data_klines_parser_t *p, market_data_json_token_kind_t tok,
-                                             double num)
+                                            double num)
 {
     market_data_kline_t *row = &p->out_klines[p->out_count];
 

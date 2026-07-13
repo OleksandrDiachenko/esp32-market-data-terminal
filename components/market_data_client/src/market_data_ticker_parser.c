@@ -172,7 +172,7 @@ market_data_err_t market_data_ticker_parser_feed(market_data_ticker_parser_t *p,
             {
                 p->skip_depth = 0;
                 p->state = skip_advance(&p->skip_depth, tok) ? MARKET_DATA_TIP_EXPECT_COMMA_OR_END
-                                                                : MARKET_DATA_TIP_SKIP_VALUE;
+                                                             : MARKET_DATA_TIP_SKIP_VALUE;
             }
             break;
 

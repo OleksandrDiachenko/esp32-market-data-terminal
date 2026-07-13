@@ -52,7 +52,7 @@ static market_data_ws_parse_result_t parse_byte_by_byte(const char *json, market
 // Deterministic pseudo-random chunk splitter (no external RNG dependency) -
 // mirrors test_market_data_klines_parser.c's chunk-boundary equivalence check.
 static market_data_ws_parse_result_t parse_random_chunks(const char *json, market_data_kline_update_t *out,
-                                                          unsigned seed)
+                                                         unsigned seed)
 {
     market_data_ws_stream_parser_t p;
     market_data_ws_stream_parser_init(&p, out);
@@ -157,9 +157,8 @@ static void test_unknown_key_inside_k_skipped(void)
 static void test_kline_missing_required_field_rejected(void)
 {
     // "n" (number_of_trades) is missing.
-    const char *json =
-        "{\"stream\":\"btcusdt@kline_1s\",\"data\":{\"e\":\"kline\",\"s\":\"BTCUSDT\","
-        "\"k\":{\"t\":1,\"o\":\"1\",\"h\":\"2\",\"l\":\"0.5\",\"c\":\"1.5\",\"v\":\"10\",\"x\":true}}}";
+    const char *json = "{\"stream\":\"btcusdt@kline_1s\",\"data\":{\"e\":\"kline\",\"s\":\"BTCUSDT\","
+                       "\"k\":{\"t\":1,\"o\":\"1\",\"h\":\"2\",\"l\":\"0.5\",\"c\":\"1.5\",\"v\":\"10\",\"x\":true}}}";
     market_data_kline_update_t u;
     CHECK(parse_one_chunk(json, &u) == MARKET_DATA_WS_PARSE_ERROR);
 }

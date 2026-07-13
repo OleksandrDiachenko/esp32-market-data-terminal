@@ -80,8 +80,7 @@ static void test_all_blocked_goes_ready_without_looping(void)
     bool saw_all_blocked = false;
     for (uint8_t i = 0; i < n; i++)
     {
-        if (actions[i].kind == WIFI_POLICY_ACT_EMIT_EVENT &&
-            actions[i].event == WIFI_POLICY_EVENT_ALL_PROFILES_BLOCKED)
+        if (actions[i].kind == WIFI_POLICY_ACT_EMIT_EVENT && actions[i].event == WIFI_POLICY_EVENT_ALL_PROFILES_BLOCKED)
         {
             saw_all_blocked = true;
         }

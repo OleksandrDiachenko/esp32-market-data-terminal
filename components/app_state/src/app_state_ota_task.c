@@ -11,17 +11,14 @@
 
 #define OTA_TASK_STACK_SIZE 6144
 #define OTA_TASK_PRIORITY 3
-#define OTA_TASK_LOOP_INTERVAL_MS 60000        // how often the loop wakes to retry a failed check
+#define OTA_TASK_LOOP_INTERVAL_MS 60000            // how often the loop wakes to retry a failed check
 #define OTA_CHECK_INTERVAL_MS (6 * 60 * 60 * 1000) // periodic release check cadence: 6h
 
 static const char *TAG = "app_state_ota";
 
 static int64_t s_last_check_ms; // 0 until the first successful check
 
-static int64_t now_ms(void)
-{
-    return esp_timer_get_time() / 1000;
-}
+static int64_t now_ms(void) { return esp_timer_get_time() / 1000; }
 
 // Returns false on a transient failure (e.g. NOT_SYNCED because Wi-Fi/time
 // aren't up yet) so the caller retries next loop iteration instead of

@@ -40,8 +40,8 @@ static void test_non_trading_status(void)
 
 static void test_spot_absent(void)
 {
-    const char *json =
-        "{\"symbols\":[{\"symbol\":\"BTCUSDT\",\"status\":\"TRADING\",\"permissionSets\":[[\"MARGIN\"],[\"LEVERAGED\"]]}]}";
+    const char *json = "{\"symbols\":[{\"symbol\":\"BTCUSDT\",\"status\":\"TRADING\",\"permissionSets\":[[\"MARGIN\"],["
+                       "\"LEVERAGED\"]]}]}";
     market_data_symbol_status_t status;
     CHECK(parse_all(json, &status) == MARKET_DATA_OK);
     CHECK(status.is_trading == true);
@@ -81,13 +81,12 @@ static void test_missing_status_field_rejected(void)
 
 static void test_large_filters_array_skipped(void)
 {
-    const char *json =
-        "{\"symbols\":[{\"symbol\":\"BTCUSDT\",\"filters\":["
-        "{\"filterType\":\"PRICE_FILTER\",\"minPrice\":\"0.01000000\",\"maxPrice\":\"1000000.00000000\","
-        "\"tickSize\":\"0.01000000\"},"
-        "{\"filterType\":\"LOT_SIZE\",\"minQty\":\"0.00001000\",\"maxQty\":\"9000.00000000\","
-        "\"stepSize\":\"0.00001000\"}"
-        "],\"status\":\"TRADING\",\"permissionSets\":[[\"SPOT\"]]}]}";
+    const char *json = "{\"symbols\":[{\"symbol\":\"BTCUSDT\",\"filters\":["
+                       "{\"filterType\":\"PRICE_FILTER\",\"minPrice\":\"0.01000000\",\"maxPrice\":\"1000000.00000000\","
+                       "\"tickSize\":\"0.01000000\"},"
+                       "{\"filterType\":\"LOT_SIZE\",\"minQty\":\"0.00001000\",\"maxQty\":\"9000.00000000\","
+                       "\"stepSize\":\"0.00001000\"}"
+                       "],\"status\":\"TRADING\",\"permissionSets\":[[\"SPOT\"]]}]}";
     market_data_symbol_status_t status;
     CHECK(parse_all(json, &status) == MARKET_DATA_OK);
     CHECK(status.is_trading == true);

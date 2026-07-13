@@ -45,15 +45,9 @@ static void push_watchlist_event(app_state_watchlist_event_kind_t kind, const ch
     }
 }
 
-QueueHandle_t app_state_get_watchlist_event_queue(void)
-{
-    return s_watchlist_event_queue;
-}
+QueueHandle_t app_state_get_watchlist_event_queue(void) { return s_watchlist_event_queue; }
 
-void app_state_notify_region_changed(void)
-{
-    push_watchlist_event(APP_STATE_REGION_CHANGED, "");
-}
+void app_state_notify_region_changed(void) { push_watchlist_event(APP_STATE_REGION_CHANGED, ""); }
 
 esp_err_t app_state_init(void)
 {
@@ -63,8 +57,7 @@ esp_err_t app_state_init(void)
         return ESP_ERR_NO_MEM;
     }
 
-    s_watchlist_event_queue =
-        xQueueCreate(APP_STATE_WATCHLIST_EVENT_QUEUE_LEN, sizeof(app_state_watchlist_event_t));
+    s_watchlist_event_queue = xQueueCreate(APP_STATE_WATCHLIST_EVENT_QUEUE_LEN, sizeof(app_state_watchlist_event_t));
     if (s_watchlist_event_queue == NULL)
     {
         return ESP_ERR_NO_MEM;
@@ -100,10 +93,7 @@ esp_err_t app_state_init(void)
     return ESP_OK;
 }
 
-uint8_t app_state_symbol_count(void)
-{
-    return s_symbol_count;
-}
+uint8_t app_state_symbol_count(void) { return s_symbol_count; }
 
 esp_err_t app_state_get_symbol_meta(uint8_t index, app_state_symbol_meta_t *out_meta)
 {
@@ -127,7 +117,7 @@ esp_err_t app_state_get_symbol_meta(uint8_t index, app_state_symbol_meta_t *out_
 }
 
 esp_err_t app_state_get_symbol_klines(uint8_t index, market_data_kline_t *out_klines, uint16_t out_capacity,
-                                       uint16_t *out_count)
+                                      uint16_t *out_count)
 {
     if (out_klines == NULL || out_count == NULL || index >= s_symbol_count)
     {
@@ -156,7 +146,8 @@ esp_err_t app_state_add_symbol(const char *ticker)
 
     // Allocate before taking the lock - PSRAM allocation shouldn't happen
     // while other tasks are blocked waiting on it for unrelated accessors.
-    market_data_kline_t *klines = heap_caps_malloc(sizeof(market_data_kline_t) * APP_STATE_KLINE_CAPACITY, MALLOC_CAP_SPIRAM);
+    market_data_kline_t *klines =
+        heap_caps_malloc(sizeof(market_data_kline_t) * APP_STATE_KLINE_CAPACITY, MALLOC_CAP_SPIRAM);
     if (klines == NULL)
     {
         ESP_LOGE(TAG, "PSRAM allocation failed for '%s' (%u bytes)", ticker,
@@ -221,7 +212,8 @@ esp_err_t app_state_move_symbol(uint8_t from_index, uint8_t to_index)
     }
 
     xSemaphoreTake(s_lock, portMAX_DELAY);
-    if (from_index >= s_symbol_count || to_index >= s_symbol_count) // re-check under the lock against a concurrent mutation
+    if (from_index >= s_symbol_count ||
+        to_index >= s_symbol_count) // re-check under the lock against a concurrent mutation
     {
         xSemaphoreGive(s_lock);
         return ESP_ERR_INVALID_ARG;

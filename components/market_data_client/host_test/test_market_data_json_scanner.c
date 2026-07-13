@@ -10,8 +10,7 @@ typedef struct
     double number;
 } captured_token_t;
 
-static int collect_all(market_data_json_scanner_t *sc, const char *buf, size_t len, captured_token_t *out,
-                        int max_out)
+static int collect_all(market_data_json_scanner_t *sc, const char *buf, size_t len, captured_token_t *out, int max_out)
 {
     int count = 0;
     while (len > 0 && count < max_out)

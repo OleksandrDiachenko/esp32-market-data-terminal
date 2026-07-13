@@ -142,16 +142,17 @@ static esp_lcd_dpi_panel_config_t make_dpi_panel_config(void)
         .virtual_channel = 0,
         .in_color_format = LCD_COLOR_FMT_RGB888,
         .num_fbs = 1,
-        .video_timing = {
-            .h_size = BOARD_JC4880P443C_LCD_H_RES,
-            .v_size = BOARD_JC4880P443C_LCD_V_RES,
-            .hsync_back_porch = 42,
-            .hsync_pulse_width = 12,
-            .hsync_front_porch = 42,
-            .vsync_back_porch = 8,
-            .vsync_pulse_width = 2,
-            .vsync_front_porch = 166,
-        },
+        .video_timing =
+            {
+                .h_size = BOARD_JC4880P443C_LCD_H_RES,
+                .v_size = BOARD_JC4880P443C_LCD_V_RES,
+                .hsync_back_porch = 42,
+                .hsync_pulse_width = 12,
+                .hsync_front_porch = 42,
+                .vsync_back_porch = 8,
+                .vsync_pulse_width = 2,
+                .vsync_front_porch = 166,
+            },
     };
 }
 
@@ -183,13 +184,15 @@ static esp_err_t panel_new(esp_lcd_panel_handle_t *out_panel, esp_lcd_panel_io_h
     st7701_vendor_config_t vendor_config = {
         .init_cmds = st7701_init_cmds,
         .init_cmds_size = sizeof(st7701_init_cmds) / sizeof(st7701_init_cmds[0]),
-        .mipi_config = {
-            .dsi_bus = dsi_bus,
-            .dpi_config = &dpi_config,
-        },
-        .flags = {
-            .use_mipi_interface = 1,
-        },
+        .mipi_config =
+            {
+                .dsi_bus = dsi_bus,
+                .dpi_config = &dpi_config,
+            },
+        .flags =
+            {
+                .use_mipi_interface = 1,
+            },
     };
     esp_lcd_panel_dev_config_t panel_config = {
         .bits_per_pixel = BOARD_LCD_BITS_PER_PIXEL,
@@ -268,8 +271,7 @@ esp_err_t board_jc4880p443c_display_start(lv_display_t **out_display)
     // The framebuffer lives in PSRAM behind the CPU data cache while the DPI
     // engine reads physical memory - write the zeros back or the panel keeps
     // scanning whatever was there before.
-    ESP_RETURN_ON_ERROR(esp_cache_msync(fb0, fb_bytes, ESP_CACHE_MSYNC_FLAG_DIR_C2M), TAG,
-                         "sync cleared framebuffer");
+    ESP_RETURN_ON_ERROR(esp_cache_msync(fb0, fb_bytes, ESP_CACHE_MSYNC_FLAG_DIR_C2M), TAG, "sync cleared framebuffer");
 
     lvgl_port_cfg_t lvgl_cfg = ESP_LVGL_PORT_INIT_CONFIG();
     ESP_RETURN_ON_ERROR(lvgl_port_init(&lvgl_cfg), TAG, "initialize LVGL port");
@@ -290,27 +292,30 @@ esp_err_t board_jc4880p443c_display_start(lv_display_t **out_display)
         // is instead applied at runtime via lv_display_set_rotation() below,
         // which drives the sw_rotate code path (lv_draw_sw_rotate) that
         // actually flips the rendered pixel buffer.
-        .rotation = {
-            .swap_xy = false,
-            .mirror_x = false,
-            .mirror_y = false,
-        },
+        .rotation =
+            {
+                .swap_xy = false,
+                .mirror_x = false,
+                .mirror_y = false,
+            },
 #if LVGL_VERSION_MAJOR >= 9
         .color_format = LV_COLOR_FORMAT_RGB888,
 #endif
-        .flags = {
-            .buff_dma = false,
-            .buff_spiram = true,
+        .flags =
+            {
+                .buff_dma = false,
+                .buff_spiram = true,
 #if LVGL_VERSION_MAJOR >= 9
-            .swap_bytes = false,
+                .swap_bytes = false,
 #endif
-            .sw_rotate = true,
-        },
+                .sw_rotate = true,
+            },
     };
     const lvgl_port_display_dsi_cfg_t dsi_cfg = {
-        .flags = {
-            .avoid_tearing = false,
-        },
+        .flags =
+            {
+                .avoid_tearing = false,
+            },
     };
 
     lv_display_t *display = lvgl_port_add_disp_dsi(&disp_cfg, &dsi_cfg);
@@ -362,17 +367,18 @@ esp_err_t board_jc4880p443c_touch_start(lv_display_t *display, lv_indev_t **out_
 
     esp_lcd_panel_io_handle_t io_handle = NULL;
     ESP_RETURN_ON_ERROR(esp_lcd_new_panel_io_i2c(touch_i2c_handle, &io_config, &io_handle), TAG,
-                         "create GT911 panel IO");
+                        "create GT911 panel IO");
 
     esp_lcd_touch_config_t touch_config = {
         .x_max = BOARD_JC4880P443C_LCD_H_RES,
         .y_max = BOARD_JC4880P443C_LCD_V_RES,
         .rst_gpio_num = BOARD_TOUCH_RESET_GPIO,
         .int_gpio_num = BOARD_TOUCH_INT_GPIO,
-        .levels = {
-            .reset = 0,
-            .interrupt = 0,
-        },
+        .levels =
+            {
+                .reset = 0,
+                .interrupt = 0,
+            },
         // NOTE: leave these at 0/0/0, even though the display above is
         // rotated 180 degrees. lvgl_port_touchpad_read() hands LVGL raw
         // touch-panel coordinates, and LVGL's own indev pipeline
@@ -383,11 +389,12 @@ esp_err_t board_jc4880p443c_touch_start(lv_display_t *display, lv_indev_t **out_
         // would apply that same correction twice and cancel it out (this
         // was tried and confirmed on hardware: touch behaved as if the
         // display were never rotated).
-        .flags = {
-            .swap_xy = 0,
-            .mirror_x = 0,
-            .mirror_y = 0,
-        },
+        .flags =
+            {
+                .swap_xy = 0,
+                .mirror_x = 0,
+                .mirror_y = 0,
+            },
     };
     esp_lcd_touch_handle_t touch = NULL;
     ESP_RETURN_ON_ERROR(esp_lcd_touch_new_i2c_gt911(io_handle, &touch_config, &touch), TAG, "initialize GT911 touch");
@@ -423,14 +430,14 @@ esp_err_t board_jc4880p443c_backlight_early_off(void)
 esp_err_t board_jc4880p443c_backlight_on(void)
 {
     ESP_RETURN_ON_ERROR(ledc_set_duty(LEDC_LOW_SPEED_MODE, BOARD_LCD_BRIGHTNESS_LEDC_CHANNEL, 1023), TAG,
-                         "set backlight duty");
+                        "set backlight duty");
     return ledc_update_duty(LEDC_LOW_SPEED_MODE, BOARD_LCD_BRIGHTNESS_LEDC_CHANNEL);
 }
 
 esp_err_t board_jc4880p443c_backlight_off(void)
 {
     ESP_RETURN_ON_ERROR(ledc_set_duty(LEDC_LOW_SPEED_MODE, BOARD_LCD_BRIGHTNESS_LEDC_CHANNEL, 0), TAG,
-                         "clear backlight duty");
+                        "clear backlight duty");
     return ledc_update_duty(LEDC_LOW_SPEED_MODE, BOARD_LCD_BRIGHTNESS_LEDC_CHANNEL);
 }
 
@@ -442,16 +449,10 @@ esp_err_t board_jc4880p443c_backlight_set_percent(uint8_t percent)
     }
     uint32_t duty = ((uint32_t)percent * 1023) / 100;
     ESP_RETURN_ON_ERROR(ledc_set_duty(LEDC_LOW_SPEED_MODE, BOARD_LCD_BRIGHTNESS_LEDC_CHANNEL, duty), TAG,
-                         "set backlight duty");
+                        "set backlight duty");
     return ledc_update_duty(LEDC_LOW_SPEED_MODE, BOARD_LCD_BRIGHTNESS_LEDC_CHANNEL);
 }
 
-bool board_jc4880p443c_display_lock(uint32_t timeout_ms)
-{
-    return lvgl_port_lock(timeout_ms);
-}
+bool board_jc4880p443c_display_lock(uint32_t timeout_ms) { return lvgl_port_lock(timeout_ms); }
 
-void board_jc4880p443c_display_unlock(void)
-{
-    lvgl_port_unlock();
-}
+void board_jc4880p443c_display_unlock(void) { lvgl_port_unlock(); }
