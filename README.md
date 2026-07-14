@@ -29,6 +29,46 @@ changes tracked in [docs/roadmap.md](docs/roadmap.md) and
 - ESP-IDF target: `esp32p4`
 - Board/display: JC4880P443C_I_W, see [docs/hardware/jc4880p443c.md](docs/hardware/jc4880p443c.md)
 
+## Flashing a pre-built release (no ESP-IDF required)
+
+New to flashing ESP32 boards? This is the fastest way to get firmware onto
+the device — no compiler or ESP-IDF install needed, just a small Python tool.
+
+1. **Install esptool** (needs Python 3):
+
+   ```sh
+   pip install esptool
+   ```
+
+2. **Download the latest release image** from the
+   [Releases page](https://github.com/OleksandrDiachenko/crypto-market-data-ticker/releases/latest) —
+   grab the `crypto-market-data-ticker-factory.bin` asset.
+
+3. **Connect the board** via USB-C and find its serial port:
+
+   ```text
+   macOS:   /dev/cu.usbmodem*
+   Linux:   /dev/ttyACM* or /dev/ttyUSB*
+   Windows: COM<N> (see Device Manager)
+   ```
+
+   This board has two USB-C ports with different flashing behavior — if the
+   port doesn't show up or flashing fails, try the other one (see
+   [docs/hardware/jc4880p443c.md](docs/hardware/jc4880p443c.md)).
+
+4. **Flash it** with a single command:
+
+   ```sh
+   esptool --chip esp32p4 -p <PORT> -b 460800 write-flash 0x0 crypto-market-data-ticker-factory.bin
+   ```
+
+5. The device reboots on its own into first-run setup (Wi-Fi, then the
+   dashboard). To watch the boot log, open any serial terminal at 115200
+   baud on the same port.
+
+This is a one-time step — after the first flash, new firmware versions are
+installed over the air from Settings > Updates, no cable required.
+
 ## Toolchain
 
 - ESP-IDF: 6.0.2
@@ -53,7 +93,8 @@ CONFIG_IDF_TARGET_ESP32P4=y
 
 ## Flash And Monitor
 
-Connect the board and run:
+Developer path — builds and flashes from source (see above for flashing a
+pre-built release without installing ESP-IDF). Connect the board and run:
 
 ```sh
 idf.py -p <PORT> flash monitor
