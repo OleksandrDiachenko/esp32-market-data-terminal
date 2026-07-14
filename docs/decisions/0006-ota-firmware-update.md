@@ -84,6 +84,32 @@ Public repo, public release assets - no GitHub token/auth header, same
 "no API keys required" property as `market_data_client`
 ([0002](0002-market-data-client.md)).
 
+### Cutting a release: two assets, not one
+
+`OTA_CLIENT_ASSET_NAME` (`crypto-market-data-ticker.bin`) is the raw app
+image `idf.py build` produces — correct for an in-place OTA update (the
+running board already has a valid bootloader/partition table, only the app
+slot changes), but not enough by itself for a from-scratch flash of a blank
+board, which also needs the bootloader and partition table.
+
+To support the README's beginner flashing path without adding CI or code
+changes, a release now carries a second, additional asset: a single merged
+image combining bootloader + partition table + otadata + app, built from
+the same `idf.py build` output. `@flash_args` uses paths relative to
+`build/`, so run this from inside that directory (hardware-validated, see
+`docs/validation/first-flash-esptool-hardware-test.md`):
+
+```sh
+cd build
+esptool --chip esp32p4 merge-bin -o ../crypto-market-data-ticker-factory.bin @flash_args
+cd ..
+```
+
+Upload both `build/crypto-market-data-ticker.bin` (unchanged, used by the
+OTA client) and `crypto-market-data-ticker-factory.bin` (new, first-flash-only
+asset) to the GitHub Release alongside the version tag. This stays a manual
+step, same as the rest of this project's release convention above.
+
 ## Consequences
 
 - `factory` is gone from `partitions.csv`; any *new* from-scratch flash
